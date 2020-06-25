@@ -2,9 +2,13 @@ extern crate nix;
 mod ffi;
 use anyhow::{anyhow, Result};
 use ffi::{GroupRecord, PasswdRecord};
+use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
-use nix::unistd::{chdir, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid};
+use nix::unistd::{
+    chdir, close, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
+};
 use std::fs::File;
+use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -126,6 +130,14 @@ pub struct Daemon {
 }
 
 // TODO: Stream redirections
+fn redirect_stdio(stdin: Stdio, stdout: Stdio, stderr: Stdio) {
+    let devnull_fd = open(
+        Path::new("/dev/null"),
+        OFlag::O_APPEND,
+        Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
+    )
+    .unwrap();
+}
 
 // TODO: Improve documentation
 impl Daemon {
@@ -191,8 +203,6 @@ impl Daemon {
                 "You can't have chmod pid file without user and group"
             ));
         }
-
-        // TODO: Redirect streams here
 
         match fork() {
             Ok(ForkResult::Parent { child: _ }) => exit(0),
