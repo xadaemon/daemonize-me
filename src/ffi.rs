@@ -1,4 +1,5 @@
 extern crate libc;
+extern crate anyhow;
 
 use anyhow::{anyhow, Context, Result};
 use std::ffi::{CStr, CString};
