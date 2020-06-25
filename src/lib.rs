@@ -6,9 +6,12 @@ use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
 use nix::unistd::{
-    chdir, close, dup2, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
+    chdir, chown, close, dup2, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid,
+    Pid, Uid,
 };
+use std::ffi::{CStr, CString};
 use std::fs::File;
+use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -130,7 +133,6 @@ pub struct Daemon {
     stderr: Stdio,
 }
 
-// TODO: Stream redirections
 fn redirect_stdio(stdin: Stdio, stdout: Stdio, stderr: Stdio) -> Result<()> {
     let devnull_fd = open(
         Path::new("/dev/null"),
@@ -174,7 +176,7 @@ impl Daemon {
 
     /// This is a setter to give your daemon a pid file
     /// # Arguments
-    /// * `path` - path to the file suggested `/var/run/myprogramname.pid`
+    /// * `path` - path to the file suggested `/var/run/my_program_name.pid`
     /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
     pub fn pid_file<T: AsRef<Path>>(mut self, path: T, chmod: Option<bool>) -> Self {
         self.pid_file = Some(path.as_ref().to_owned());
@@ -215,23 +217,55 @@ impl Daemon {
     pub fn start(self) -> Result<()> {
         let sid: Pid;
         let pid: Pid;
+        // Set up stream redirection as early as possible
         redirect_stdio(self.stdin, self.stdout, self.stderr)?;
         if self.chown_pid_file && (self.user.is_none() && self.group.is_none()) {
             return Err(anyhow!(
                 "You can't have chmod pid file without user and group"
             ));
         }
+        let user = match self.user.unwrap() {
+            User::Id(id) => id,
+        };
+        let gr = match self.group.unwrap() {
+            Group::Id(id) => id,
+        };
+        // Fork and if the process is the parent exit gracefully
+        // if the  process is the child just continue execution
         match fork() {
             Ok(ForkResult::Parent { child: _ }) => exit(0),
             Ok(ForkResult::Child) => (),
             Err(_) => return Err(anyhow!("Failed to fork")),
         }
+        // Set the umask either to 0o027 (rwxr-x---) or provided value
         umask(Mode::from_bits(self.umask as u32).unwrap());
-        sid = setsid().expect("faield to setsid");
+        // Set the sid so the process isn't session orphan
+        sid = setsid().expect("failed to setsid");
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
             return Err(anyhow!("failed to chdir"));
         };
-
+        pid = getpid();
+        // create pid file and if configured to chmod it
+        if self.pid_file.is_some() {
+            let pid_path = self.pid_file.unwrap();
+            File::create(pid_path.to_owned())?.write_all(pid.to_string().as_ref())?;
+            if self.chown_pid_file {
+                chown::<Path>(
+                    pid_path.to_owned().as_ref(),
+                    Some(Uid::from_raw(user)),
+                    Some(Gid::from_raw(gr)),
+                )
+                .expect("Could not chmod the pid file");
+            }
+        }
+        // Drop privileges
+        setuid(Uid::from_raw(user))?;
+        setgid(Gid::from_raw(gr))?;
+        let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
+        initgroups(CString::new(uname)?.as_ref(), Gid::from_raw(gr))?;
+        // chdir
+        chdir::<Path>(self.chdir.to_owned().as_ref())?;
+        // Now this process should be a daemon return
         Ok(())
     }
 }
@@ -245,6 +279,9 @@ mod tests {
     fn test_uname_to_uid_resolution() {
         let daemon = Daemon::new().user("root");
         assert!(daemon.user.is_some());
-        // assert_eq!(Some(daemon.user))
+        let uid = match daemon.user.unwrap() {
+            User::Id(id) => id,
+        };
+        assert_eq!(uid, 0)
     }
 }

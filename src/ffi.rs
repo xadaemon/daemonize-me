@@ -69,7 +69,7 @@ impl GroupRecord {
             }
         };
     }
-    pub fn get_record_by_id(gid: i32) -> Result<GroupRecord> {
+    pub fn get_record_by_id(gid: u32) -> Result<GroupRecord> {
         let record_id = gid as libc::uid_t;
 
         unsafe {
@@ -113,7 +113,7 @@ impl PasswdRecord {
             }
         };
     }
-    pub fn get_record_by_id(uid: i32) -> Result<PasswdRecord> {
+    pub fn get_record_by_id(uid: u32) -> Result<PasswdRecord> {
         let record_id = uid as libc::uid_t;
 
         unsafe {
