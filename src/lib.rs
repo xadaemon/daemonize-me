@@ -1,4 +1,5 @@
 mod ffi;
+use ffi::{GroupRecord, PasswdRecord};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -6,19 +7,22 @@ use std::path::{Path, PathBuf};
 /// if the name is provided it will be resolved to an id
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone)]
 pub enum User {
-    Name(String),
     Id(u32),
 }
 
 impl<'uname> From<&'uname str> for User {
     fn from(uname: &'uname str) -> User {
-        User::Name(uname.to_owned())
+        User::Id(PasswdRecord::get_record_by_name(uname).unwrap().pw_uid)
     }
 }
 
 impl From<String> for User {
     fn from(uname: String) -> User {
-        User::Name(uname)
+        User::Id(
+            PasswdRecord::get_record_by_name(uname.as_str())
+                .unwrap()
+                .pw_uid,
+        )
     }
 }
 
@@ -32,19 +36,22 @@ impl From<u32> for User {
 /// if the name is provided it will be resolved to an id
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone)]
 pub enum Group {
-    Name(String),
     Id(u32),
 }
 
 impl<'uname> From<&'uname str> for Group {
-    fn from(uname: &'uname str) -> Group {
-        Group::Name(uname.to_owned())
+    fn from(gname: &'uname str) -> Group {
+        Group::Id(GroupRecord::get_record_by_name(gname).unwrap().gr_gid)
     }
 }
 
 impl From<String> for Group {
-    fn from(uname: String) -> Group {
-        Group::Name(uname)
+    fn from(gname: String) -> Group {
+        Group::Id(
+            GroupRecord::get_record_by_name(gname.as_str())
+                .unwrap()
+                .gr_gid,
+        )
     }
 }
 
@@ -128,6 +135,3 @@ impl Daemon {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {}

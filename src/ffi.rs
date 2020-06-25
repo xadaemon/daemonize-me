@@ -2,7 +2,6 @@ extern crate libc;
 
 use anyhow::{anyhow, Context, Result};
 use std::ffi::{CStr, CString};
-use std::mem;
 
 #[repr(C)]
 #[allow(dead_code)]
@@ -36,15 +35,15 @@ extern "C" {
 pub struct GroupRecord {
     pub gr_name: String,
     pub gr_passwd: String,
-    pub gr_gid: i32,
+    pub gr_gid: u32,
 }
 
 #[derive(Debug)]
 pub struct PasswdRecord {
     pub pw_name: String,
     pub pw_passwd: String,
-    pub pw_uid: i32,
-    pub pw_gid: i32,
+    pub pw_uid: u32,
+    pub pw_gid: u32,
     pub pw_gecos: String,
     pub pw_dir: String,
     pub pw_shell: String,
@@ -64,7 +63,7 @@ impl GroupRecord {
                 let sgr = GroupRecord {
                     gr_name: CStr::from_ptr(gr.gr_name).to_str()?.to_string(),
                     gr_passwd: CStr::from_ptr(gr.gr_passwd).to_str()?.to_string(),
-                    gr_gid: gr.gr_gid as i32,
+                    gr_gid: gr.gr_gid as u32,
                 };
                 return Ok(sgr);
             }
@@ -82,7 +81,7 @@ impl GroupRecord {
                 let sgr = GroupRecord {
                     gr_name: CStr::from_ptr(gr.gr_name).to_str()?.to_string(),
                     gr_passwd: CStr::from_ptr(gr.gr_passwd).to_str()?.to_string(),
-                    gr_gid: gr.gr_gid as i32,
+                    gr_gid: gr.gr_gid as u32,
                 };
                 return Ok(sgr);
             }
@@ -104,8 +103,8 @@ impl PasswdRecord {
                 let pwr = PasswdRecord {
                     pw_name: CStr::from_ptr(pw.pw_name).to_str()?.to_string(),
                     pw_passwd: CStr::from_ptr(pw.pw_passwd).to_str()?.to_string(),
-                    pw_uid: pw.pw_uid as i32,
-                    pw_gid: pw.pw_gid as i32,
+                    pw_uid: pw.pw_uid as u32,
+                    pw_gid: pw.pw_gid as u32,
                     pw_gecos: CStr::from_ptr(pw.pw_gecos).to_str()?.to_string(),
                     pw_dir: CStr::from_ptr(pw.pw_dir).to_str()?.to_string(),
                     pw_shell: CStr::from_ptr(pw.pw_shell).to_str()?.to_string(),
@@ -126,8 +125,8 @@ impl PasswdRecord {
                 let pwr = PasswdRecord {
                     pw_name: CStr::from_ptr(pw.pw_name).to_str()?.to_string(),
                     pw_passwd: CStr::from_ptr(pw.pw_passwd).to_str()?.to_string(),
-                    pw_uid: pw.pw_uid as i32,
-                    pw_gid: pw.pw_gid as i32,
+                    pw_uid: pw.pw_uid as u32,
+                    pw_gid: pw.pw_gid as u32,
                     pw_gecos: CStr::from_ptr(pw.pw_gecos).to_str()?.to_string(),
                     pw_dir: CStr::from_ptr(pw.pw_dir).to_str()?.to_string(),
                     pw_shell: CStr::from_ptr(pw.pw_shell).to_str()?.to_string(),
@@ -135,5 +134,38 @@ impl PasswdRecord {
                 return Ok(pwr);
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO: Improve testing because of unsafe code
+    use super::*;
+    #[test]
+    /// Asserts if the uid returned for the uname "root" is 0
+    fn test_passwd_by_name() {
+        let root = PasswdRecord::get_record_by_name("root").unwrap();
+        assert_eq!(root.pw_uid, 0)
+    }
+
+    #[test]
+    /// Asserts if the uname returned by the uid 0 is "root"
+    fn test_passwd_by_uid() {
+        let root = PasswdRecord::get_record_by_id(0).unwrap();
+        assert_eq!(root.pw_name, "root")
+    }
+
+    #[test]
+    /// Asserts if the uid returned for the uname "root" is 0
+    fn test_gr_by_name() {
+        let root = GroupRecord::get_record_by_name("root").unwrap();
+        assert_eq!(root.gr_gid, 0)
+    }
+
+    #[test]
+    /// Asserts if the uname returned by the uid 0 is "root"
+    fn test_gr_by_gid() {
+        let root = GroupRecord::get_record_by_id(0).unwrap();
+        assert_eq!(root.gr_name, "root")
     }
 }
