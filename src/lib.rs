@@ -229,12 +229,6 @@ impl Daemon {
                 "You can't have chmod pid file without user and group"
             ));
         }
-        let user = match self.user.unwrap() {
-            User::Id(id) => id,
-        };
-        let gr = match self.group.unwrap() {
-            Group::Id(id) => id,
-        };
         // Fork and if the process is the parent exit gracefully
         // if the  process is the child just continue execution
         match fork() {
@@ -252,24 +246,40 @@ impl Daemon {
         pid = getpid();
         // create pid file and if configured to, chmod it
         if self.pid_file.is_some() {
+            // chmod of the pid file is deferred to afterchecking for the presence of the user and group
             let pid_file = self.pid_file.unwrap().to_owned();
             File::create(&pid_file)?.write_all(pid.to_string().as_ref())?;
-            if self.chown_pid_file {
-                match chown::<Path>(
-                    pid_file.as_path(),
-                    Some(Uid::from_raw(user)),
-                    Some(Gid::from_raw(gr)),
-                ) {
-                    Ok(_) => (),
-                    Err(e) => return Err(anyhow!("Could not chown the pid file with error {}", e)),
-                };
-            }
         }
         // Drop privileges
-        let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
-        setuid(Uid::from_raw(user))?;
-        setgid(Gid::from_raw(gr))?;
-        initgroups(CString::new(uname)?.as_ref(), Gid::from_raw(gr))?;
+        if self.user.is_some() && self.group.is_some() {
+            let user = match self.user.unwrap() {
+                User::Id(id) => id,
+            };
+
+            let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
+
+            let gr = match self.group.unwrap() {
+                Group::Id(id) => id,
+            };
+            match setgid(Gid::from_raw(gr)) {
+                Ok(_) => (),
+                Err(e) => return Err(anyhow!("failed to setgid to {}", gr)),
+            };
+            match initgroups(CString::new(uname)?.as_ref(), Gid::from_raw(gr)) {
+                Ok(_) => (),
+                Err(e) => {
+                    return Err(anyhow!(
+                        "failed to initgroups for user: {} and group: {}",
+                        user,
+                        gr
+                    ))
+                }
+            };
+            match setuid(Uid::from_raw(user)) {
+                Ok(_) => (),
+                Err(e) => return Err(anyhow!("failed to setuid to {}", user)),
+            }
+        }
         // chdir
         let chdir_path = self.chdir.to_owned();
         match chdir::<Path>(chdir_path.as_ref()) {
@@ -289,7 +299,9 @@ impl Daemon {
 #[cfg(test)]
 mod tests {
     // TODO: Improve testing coverage
+    extern crate nix;
     use super::*;
+    use nix::unistd::{getgid, getuid};
 
     #[test]
     fn test_uname_to_uid_resolution() {

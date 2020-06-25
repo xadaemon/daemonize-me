@@ -1,7 +1,7 @@
 extern crate daemonize_me;
 use daemonize_me::Daemon;
+use nix::unistd::{getgid, getuid};
 use std::fs::File;
-use nix::unistd::{getuid, getgid};
 
 fn main() {
     let stdout = File::create("info.log").unwrap();
@@ -14,7 +14,7 @@ fn main() {
         .user("daemon")
         .group("daemon")
         .umask(0o000)
-        .work_dir("/home/mxavier/Documents/daemonize-me")
+        .work_dir(".")
         .stdout(stdout)
         .stderr(stderr)
         .start();
