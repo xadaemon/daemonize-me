@@ -1,3 +1,4 @@
+extern crate libc;
 extern crate nix;
 mod ffi;
 use anyhow::{anyhow, Result};
@@ -5,10 +6,10 @@ use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
 use nix::unistd::{
-    chdir, close, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
+    chdir, close, dup2, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
 use std::fs::File;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -130,13 +131,29 @@ pub struct Daemon {
 }
 
 // TODO: Stream redirections
-fn redirect_stdio(stdin: Stdio, stdout: Stdio, stderr: Stdio) {
+fn redirect_stdio(stdin: Stdio, stdout: Stdio, stderr: Stdio) -> Result<()> {
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
         Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
-    )
-    .unwrap();
+    )?;
+
+    let proc_stream = |fd, stdio: Stdio| {
+        close(fd).unwrap();
+        match stdio.inner {
+            StdioImp::Devnull => return dup2(devnull_fd, fd).unwrap(),
+            StdioImp::RedirectToFile(file) => {
+                let raw_fd = file.as_raw_fd();
+                return dup2(raw_fd, fd).unwrap();
+            }
+        }
+    };
+
+    proc_stream(libc::STDIN_FILENO, stdin);
+    proc_stream(libc::STDOUT_FILENO, stdout);
+    proc_stream(libc::STDERR_FILENO, stderr);
+
+    Ok(())
 }
 
 // TODO: Improve documentation
@@ -158,7 +175,7 @@ impl Daemon {
     /// This is a setter to give your daemon a pid file
     /// # Arguments
     /// * `path` - path to the file suggested `/var/run/myprogramname.pid`
-    /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (this being true makes setting an user and group mandatory)
+    /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
     pub fn pid_file<T: AsRef<Path>>(mut self, path: T, chmod: Option<bool>) -> Self {
         self.pid_file = Some(path.as_ref().to_owned());
         self.chown_pid_file = chmod.unwrap_or(false);
@@ -195,15 +212,15 @@ impl Daemon {
         self
     }
 
-    pub fn start(self) -> Result<Daemon> {
+    pub fn start(self) -> Result<()> {
         let sid: Pid;
         let pid: Pid;
+        redirect_stdio(self.stdin, self.stdout, self.stderr)?;
         if self.chown_pid_file && (self.user.is_none() && self.group.is_none()) {
             return Err(anyhow!(
                 "You can't have chmod pid file without user and group"
             ));
         }
-
         match fork() {
             Ok(ForkResult::Parent { child: _ }) => exit(0),
             Ok(ForkResult::Child) => (),
@@ -215,6 +232,19 @@ impl Daemon {
             return Err(anyhow!("failed to chdir"));
         };
 
-        Ok(self)
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO: Improve testing coverage
+    use super::*;
+
+    #[test]
+    fn test_uname_to_uid_resolution() {
+        let daemon = Daemon::new().user("root");
+        assert!(daemon.user.is_some());
+        // assert_eq!(Some(daemon.user))
     }
 }
