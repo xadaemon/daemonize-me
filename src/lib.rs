@@ -1,7 +1,8 @@
+extern crate anyhow;
 extern crate libc;
 extern crate nix;
 mod ffi;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
@@ -204,6 +205,11 @@ impl Daemon {
         self
     }
 
+    pub fn stdin<T: Into<Stdio>>(mut self, stdio: T) -> Self {
+        self.stdin = stdio.into();
+        self
+    }
+
     pub fn stdout<T: Into<Stdio>>(mut self, stdio: T) -> Self {
         self.stdout = stdio.into();
         self
@@ -215,7 +221,6 @@ impl Daemon {
     }
 
     pub fn start(self) -> Result<()> {
-        let sid: Pid;
         let pid: Pid;
         // Set up stream redirection as early as possible
         redirect_stdio(self.stdin, self.stdout, self.stderr)?;
@@ -240,31 +245,42 @@ impl Daemon {
         // Set the umask either to 0o027 (rwxr-x---) or provided value
         umask(Mode::from_bits(self.umask as u32).unwrap());
         // Set the sid so the process isn't session orphan
-        sid = setsid().expect("failed to setsid");
+        setsid().expect("failed to setsid");
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
             return Err(anyhow!("failed to chdir"));
         };
         pid = getpid();
-        // create pid file and if configured to chmod it
+        // create pid file and if configured to, chmod it
         if self.pid_file.is_some() {
-            let pid_path = self.pid_file.unwrap();
-            File::create(pid_path.to_owned())?.write_all(pid.to_string().as_ref())?;
+            let pid_file = self.pid_file.unwrap().to_owned();
+            File::create(&pid_file)?.write_all(pid.to_string().as_ref())?;
             if self.chown_pid_file {
-                chown::<Path>(
-                    pid_path.to_owned().as_ref(),
+                match chown::<Path>(
+                    pid_file.as_path(),
                     Some(Uid::from_raw(user)),
                     Some(Gid::from_raw(gr)),
-                )
-                .expect("Could not chmod the pid file");
+                ) {
+                    Ok(_) => (),
+                    Err(e) => return Err(anyhow!("Could not chown the pid file with error {}", e)),
+                };
             }
         }
         // Drop privileges
+        let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
         setuid(Uid::from_raw(user))?;
         setgid(Gid::from_raw(gr))?;
-        let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
         initgroups(CString::new(uname)?.as_ref(), Gid::from_raw(gr))?;
         // chdir
-        chdir::<Path>(self.chdir.to_owned().as_ref())?;
+        let chdir_path = self.chdir.to_owned();
+        match chdir::<Path>(chdir_path.as_ref()) {
+            Ok(_) => (),
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to chdir to {}",
+                    chdir_path.as_path().display()
+                ))
+            }
+        };
         // Now this process should be a daemon return
         Ok(())
     }
