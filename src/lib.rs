@@ -1,7 +1,12 @@
+extern crate nix;
 mod ffi;
+use anyhow::{anyhow, Result};
 use ffi::{GroupRecord, PasswdRecord};
+use nix::sys::stat::{umask, Mode};
+use nix::unistd::{chdir, fork, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid};
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::process::exit;
 
 /// Expects: either the username or the uid
 /// if the name is provided it will be resolved to an id
@@ -120,6 +125,9 @@ pub struct Daemon {
     stderr: Stdio,
 }
 
+// TODO: Stream redirections
+
+// TODO: Improve documentation
 impl Daemon {
     pub fn new() -> Self {
         Daemon {
@@ -133,5 +141,70 @@ impl Daemon {
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
         }
+    }
+
+    /// This is a setter to give your daemon a pid file
+    /// # Arguments
+    /// * `path` - path to the file suggested `/var/run/myprogramname.pid`
+    /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (this being true makes setting an user and group mandatory)
+    pub fn pid_file<T: AsRef<Path>>(mut self, path: T, chmod: Option<bool>) -> Self {
+        self.pid_file = Some(path.as_ref().to_owned());
+        self.chown_pid_file = chmod.unwrap_or(false);
+        self
+    }
+
+    pub fn work_dir<T: AsRef<Path>>(mut self, path: T) -> Self {
+        self.chdir = path.as_ref().to_owned();
+        self
+    }
+
+    pub fn user<T: Into<User>>(mut self, user: T) -> Self {
+        self.user = Some(user.into());
+        self
+    }
+
+    pub fn group<T: Into<Group>>(mut self, group: T) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    pub fn umask(mut self, mask: u16) -> Self {
+        self.umask = mask;
+        self
+    }
+
+    pub fn stdout<T: Into<Stdio>>(mut self, stdio: T) -> Self {
+        self.stdout = stdio.into();
+        self
+    }
+
+    pub fn stderr<T: Into<Stdio>>(mut self, stdio: T) -> Self {
+        self.stderr = stdio.into();
+        self
+    }
+
+    pub fn start(self) -> Result<Daemon> {
+        let sid: Pid;
+        let pid: Pid;
+        if self.chown_pid_file && (self.user.is_none() && self.group.is_none()) {
+            return Err(anyhow!(
+                "You can't have chmod pid file without user and group"
+            ));
+        }
+
+        // TODO: Redirect streams here
+
+        match fork() {
+            Ok(ForkResult::Parent { child: _ }) => exit(0),
+            Ok(ForkResult::Child) => (),
+            Err(_) => return Err(anyhow!("Failed to fork")),
+        }
+        umask(Mode::from_bits(self.umask as u32).unwrap());
+        sid = setsid().expect("faield to setsid");
+        if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
+            return Err(anyhow!("failed to chdir"));
+        };
+
+        Ok(self)
     }
 }
