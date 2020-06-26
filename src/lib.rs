@@ -1,8 +1,10 @@
+mod ffi;
+mod util;
+
 extern crate anyhow;
 extern crate libc;
 extern crate nix;
-mod ffi;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
@@ -10,7 +12,7 @@ use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid,
     Pid, Uid,
 };
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::fs::File;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
@@ -108,8 +110,8 @@ impl From<File> for Stdio {
 /// to files and finally dropping privileges.
 ///
 /// Options:
-/// * user [optional], if set will drop privileges to the specified user
-/// * group [optional], if set will drop privileges to specified group
+/// * user [optional], if set will drop privileges to the specified user **NOTE**: This library is strict and makes no assumptions if you provide a user you must provide a group  
+/// * group [optional(**see note on user**)], if set will drop privileges to specified group
 /// * umask [optional], umask for the process defaults to 0o027
 /// * pid_file [optional], if set a pid file will be created default is that no file is created <sup>*</sup>
 /// * stdio [optional][**recommended**], this determines where standard output will be piped to since daemons have no console it's highly recommended to set this
@@ -129,21 +131,22 @@ pub struct Daemon {
     user: Option<User>,
     group: Option<Group>,
     umask: u16,
+    chmod_stdio_files: bool,
     stdin: Stdio, // stdin is practically always null
     stdout: Stdio,
     stderr: Stdio,
 }
 
-fn redirect_stdio(stdin: Stdio, stdout: Stdio, stderr: Stdio) -> Result<()> {
+fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
         Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
     )?;
 
-    let proc_stream = |fd, stdio: Stdio| {
+    let proc_stream = |fd, stdio: &Stdio| {
         close(fd).unwrap();
-        match stdio.inner {
+        match &stdio.inner {
             StdioImp::Devnull => return dup2(devnull_fd, fd).unwrap(),
             StdioImp::RedirectToFile(file) => {
                 let raw_fd = file.as_raw_fd();
@@ -169,6 +172,7 @@ impl Daemon {
             user: None,
             group: None,
             umask: 0o027,
+            chmod_stdio_files: false,
             stdin: Stdio::devnull(),
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
@@ -205,6 +209,11 @@ impl Daemon {
         self
     }
 
+    pub fn chmod_stdio_files(mut self, v: bool) -> Self {
+        self.chmod_stdio_files = v;
+        self
+    }
+
     pub fn stdin<T: Into<Stdio>>(mut self, stdio: T) -> Self {
         self.stdin = stdio.into();
         self
@@ -222,11 +231,24 @@ impl Daemon {
 
     pub fn start(self) -> Result<()> {
         let pid: Pid;
+        // resolve options to concrete values to please the borrow checker
+        let has_pid_file = self.pid_file.is_some();
+        let pid_file_path = match self.pid_file {
+            Some(path) => path.clone(),
+            None => Path::new("").to_path_buf(),
+        };
+
         // Set up stream redirection as early as possible
-        redirect_stdio(self.stdin, self.stdout, self.stderr)?;
-        if self.chown_pid_file && (self.user.is_none() && self.group.is_none()) {
+        redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+        if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
             return Err(anyhow!(
-                "You can't have chmod pid file without user and group"
+                "You can't chmod the pid file without providing user and group"
+            ));
+        } else if (self.user.is_some() || self.group.is_some())
+            && (self.user.is_none() || self.group.is_none())
+        {
+            return Err(anyhow!(
+                "If you provide a user or group the other must be provided too"
             ));
         }
         // Fork and if the process is the parent exit gracefully
@@ -245,39 +267,45 @@ impl Daemon {
         };
         pid = getpid();
         // create pid file and if configured to, chmod it
-        if self.pid_file.is_some() {
-            // chmod of the pid file is deferred to afterchecking for the presence of the user and group
-            let pid_file = self.pid_file.unwrap().to_owned();
-            File::create(&pid_file)?.write_all(pid.to_string().as_ref())?;
+        if has_pid_file {
+            // chmod of the pid file is deferred to after checking for the presence of the user and group
+            let pid_file = &pid_file_path;
+            File::create(pid_file)?.write_all(pid.to_string().as_ref())?;
         }
-        // Drop privileges
+        // Drop privileges and chown the requested files
         if self.user.is_some() && self.group.is_some() {
             let user = match self.user.unwrap() {
-                User::Id(id) => id,
+                User::Id(id) => Uid::from_raw(id),
             };
 
-            let uname = PasswdRecord::get_record_by_id(user)?.pw_name;
+            let uname = PasswdRecord::get_record_by_id(user.as_raw())?.pw_name;
 
             let gr = match self.group.unwrap() {
-                Group::Id(id) => id,
+                Group::Id(id) => Gid::from_raw(id),
             };
-            match setgid(Gid::from_raw(gr)) {
+
+            if self.chown_pid_file && has_pid_file {
+                chown(&pid_file_path, Some(user), Some(gr))?;
+            }
+
+            match setgid(gr) {
                 Ok(_) => (),
-                Err(e) => return Err(anyhow!("failed to setgid to {}", gr)),
+                Err(e) => return Err(anyhow!("failed to setgid to {} with error {}", &gr, e)),
             };
-            match initgroups(CString::new(uname)?.as_ref(), Gid::from_raw(gr)) {
+            match initgroups(CString::new(uname)?.as_ref(), gr) {
                 Ok(_) => (),
                 Err(e) => {
                     return Err(anyhow!(
-                        "failed to initgroups for user: {} and group: {}",
+                        "failed to initgroups for user: {} and group: {} with error {}",
                         user,
-                        gr
+                        gr,
+                        e
                     ))
                 }
             };
-            match setuid(Uid::from_raw(user)) {
+            match setuid(user) {
                 Ok(_) => (),
-                Err(e) => return Err(anyhow!("failed to setuid to {}", user)),
+                Err(e) => return Err(anyhow!("failed to setuid to {} with error {}", user, e)),
             }
         }
         // chdir
@@ -286,12 +314,13 @@ impl Daemon {
             Ok(_) => (),
             Err(e) => {
                 return Err(anyhow!(
-                    "Failed to chdir to {}",
-                    chdir_path.as_path().display()
+                    "Failed to chdir to {} with error {}",
+                    chdir_path.as_path().display(),
+                    e
                 ))
             }
         };
-        // Now this process should be a daemon return
+        // Now this process should be a daemon, return
         Ok(())
     }
 }
@@ -301,7 +330,6 @@ mod tests {
     // TODO: Improve testing coverage
     extern crate nix;
     use super::*;
-    use nix::unistd::{getgid, getuid};
 
     #[test]
     fn test_uname_to_uid_resolution() {

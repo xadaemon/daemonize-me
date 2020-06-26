@@ -1,5 +1,5 @@
-extern crate libc;
 extern crate anyhow;
+extern crate libc;
 
 use anyhow::{anyhow, Context, Result};
 use std::ffi::{CStr, CString};
@@ -25,6 +25,7 @@ struct passwd {
     pw_shell: *const libc::c_char,
 }
 
+#[allow(dead_code)]
 extern "C" {
     fn getgrnam(name: *const libc::c_char) -> *const group;
     fn getgrgid(name: libc::gid_t) -> *const group;
@@ -33,6 +34,7 @@ extern "C" {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GroupRecord {
     pub gr_name: String,
     pub gr_passwd: String,
@@ -40,6 +42,7 @@ pub struct GroupRecord {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct PasswdRecord {
     pub pw_name: String,
     pub pw_passwd: String,
@@ -50,6 +53,7 @@ pub struct PasswdRecord {
     pub pw_shell: String,
 }
 
+#[allow(dead_code)]
 impl GroupRecord {
     pub fn get_record_by_name(name: &str) -> Result<GroupRecord> {
         let record_name =

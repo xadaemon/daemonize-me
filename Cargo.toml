@@ -5,7 +5,6 @@ authors = ["Matheus Xavier <mxavier@mail.cmdforge.com>"]
 edition = "2018"
 keywords = ["daemon", "library"]
 license = "BSD-3-Clause"
-license-file= "LICENSE"
 repository = "https://github.com/CardinalBytes/daemonize-me/tree/master"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
