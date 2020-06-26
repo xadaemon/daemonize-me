@@ -1,11 +1,13 @@
 [package]
 name = "daemonize-me"
-version = "0.1.0"
+version = "0.1.0-alpha"
 authors = ["Matheus Xavier <mxavier@mail.cmdforge.com>"]
 edition = "2018"
-keywords = ["daemon", "library"]
 license = "BSD-3-Clause"
-repository = "https://github.com/CardinalBytes/daemonize-me/tree/master"
+repository = "https://github.com/CardinalBytes/daemonize-me"
+description = "Rust library to ease the task of creating daemons on unix-like systems"
+keywords = ["daemon", "daemonize", "daemonize-me", "unix"]
+categories = ["os::unix-apis"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
