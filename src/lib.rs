@@ -7,8 +7,6 @@
 /// fn main() {
 ///     let stdout = File::create("info.log").unwrap();
 ///     let stderr = File::create("err.log").unwrap();
-///     let uid = getuid();
-///     let gid = getgid();
 ///     let daemon = Daemon::new()
 ///         .pid_file("example.pid", Some(false))
 ///         .user("daemon")
