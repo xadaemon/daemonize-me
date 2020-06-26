@@ -1,3 +1,30 @@
+/// example usage
+/// ```
+/// extern crate daemonize_me;
+/// use daemonize_me::Daemon;
+/// use std::fs::File;
+///
+/// fn main() {
+///     let stdout = File::create("info.log").unwrap();
+///     let stderr = File::create("err.log").unwrap();
+///     let uid = getuid();
+///     let gid = getgid();
+///     let daemon = Daemon::new()
+///         .pid_file("example.pid", Some(false))
+///         .user("daemon")
+///         .group("daemon")
+///         .umask(0o000)
+///         .work_dir(".")
+///         .stdout(stdout)
+///         .stderr(stderr)
+///         .start();
+///
+///     match daemon {
+///         Ok(_) => println!("Daemonized with success"),
+///         Err(e) => eprintln!("Error, {}", e),
+///     }
+/// }
+/// ```
 mod ffi;
 mod util;
 
@@ -186,17 +213,17 @@ impl Daemon {
         self.chown_pid_file = chmod.unwrap_or(false);
         self
     }
-
+    /// As the last step the code will change the working directory to this one defaults to `/`
     pub fn work_dir<T: AsRef<Path>>(mut self, path: T) -> Self {
         self.chdir = path.as_ref().to_owned();
         self
     }
-
+    /// The code will attempt to drop privileges with `setuid` to the provided user
     pub fn user<T: Into<User>>(mut self, user: T) -> Self {
         self.user = Some(user.into());
         self
     }
-
+    /// The code will attempt to drop privileges with `setgid` to the provided group, you mut provide a group if you provide an user
     pub fn group<T: Into<Group>>(mut self, group: T) -> Self {
         self.group = Some(group.into());
         self
