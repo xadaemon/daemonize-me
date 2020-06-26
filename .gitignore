@@ -2,3 +2,4 @@
 Cargo.lock
 .log
 .pid
+tmp

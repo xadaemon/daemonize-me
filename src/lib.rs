@@ -131,7 +131,6 @@ pub struct Daemon {
     user: Option<User>,
     group: Option<Group>,
     umask: u16,
-    chmod_stdio_files: bool,
     stdin: Stdio, // stdin is practically always null
     stdout: Stdio,
     stderr: Stdio,
@@ -172,7 +171,6 @@ impl Daemon {
             user: None,
             group: None,
             umask: 0o027,
-            chmod_stdio_files: false,
             stdin: Stdio::devnull(),
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
@@ -206,11 +204,6 @@ impl Daemon {
 
     pub fn umask(mut self, mask: u16) -> Self {
         self.umask = mask;
-        self
-    }
-
-    pub fn chmod_stdio_files(mut self, v: bool) -> Self {
-        self.chmod_stdio_files = v;
         self
     }
 
