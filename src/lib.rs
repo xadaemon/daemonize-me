@@ -277,6 +277,9 @@ impl Daemon {
             Err(_) => return Err(anyhow!("Failed to fork")),
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
+        #[cfg(target_os = "linux")]
+        umask(Mode::from_bits(self.umask as u32).unwrap());
+        #[cfg(target_os = "freebsd")]
         umask(Mode::from_bits(self.umask as u32).unwrap());
         // Set the sid so the process isn't session orphan
         setsid().expect("failed to setsid");
