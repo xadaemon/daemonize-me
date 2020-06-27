@@ -8,7 +8,8 @@ This being said, I'm electing to release the library in a first version as is an
 Example:
 ```rust
 extern crate daemonize_me;
-use daemonize_me::Daemon;
+use daemonize_me::{Daemon, Group, User};
+use std::convert::TryFrom;
 use std::fs::File;
 
 fn main() {
@@ -16,8 +17,8 @@ fn main() {
     let stderr = File::create("err.log").unwrap();
     let daemon = Daemon::new()
         .pid_file("example.pid", Some(false))
-        .user("daemon")
-        .group("daemon")
+        .user(User::try_from("daemon").unwrap())
+        .group(Group::try_from("daemon").unwrap())
         .umask(0o000)
         .work_dir(".")
         .stdout(stdout)
