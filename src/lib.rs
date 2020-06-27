@@ -280,7 +280,7 @@ impl Daemon {
         #[cfg(target_os = "linux")]
         umask(Mode::from_bits(self.umask as u32).unwrap());
         #[cfg(target_os = "freebsd")]
-        umask(Mode::from_bits(self.umask as u32).unwrap());
+        umask(Mode::from_bits(self.umask as u16).unwrap());
         // Set the sid so the process isn't session orphan
         setsid().expect("failed to setsid");
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {

@@ -1,6 +1,6 @@
 [package]
 name = "daemonize-me"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 authors = ["Matheus Xavier <mxavier@mail.cmdforge.com>"]
 edition = "2018"
 license = "BSD-3-Clause"
