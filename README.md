@@ -31,12 +31,25 @@ fn main() {
 }
 ```
 
+# OS support
+I will try to keep support for linux, freebsd and macos
+
+| os | tier |
+| --- | --- |
+| linux | tier 1 |
+| freebsd, netbsd | tier 2 |
+| macos, unix, *nix | tier 3 |
+
+For tier 1 any code that breaks the tests and or ci/cd is blocking for a release, 
+tier 2 compilation errors are release blocking, tier 3 are supported on a best effort basis,
+and build failure as well as test failures are not blocking.  
+
 #License
 
 Licensed under either of
 
-    * Apache License, Version 2.0 (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
-    * BSD 3 Clause License
+* Apache License, Version 2.0 (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+* BSD 3 Clause License
 
 # Contribution
 
