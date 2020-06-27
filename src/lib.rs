@@ -172,7 +172,7 @@ fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
-        Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
+        Mode::from_bits(OFlag::O_RDWR.bits() as u16).unwrap(),
     )?;
 
     let proc_stream = |fd, stdio: &Stdio| {
