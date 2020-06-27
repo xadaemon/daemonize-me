@@ -40,8 +40,7 @@ use nix::unistd::{
 };
 #[cfg(target_os = "macos")]
 use nix::unistd::{
-    chdir, chown, close, dup2, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid,
-    Pid, Uid,
+    chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
 use std::ffi::CString;
 use std::fs::File;
