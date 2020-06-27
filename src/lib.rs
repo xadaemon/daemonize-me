@@ -33,6 +33,12 @@ use anyhow::{anyhow, Result};
 use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
+#[cfg(not(target_os = "macos"))]
+use nix::unistd::{
+    chdir, chown, close, dup2, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid,
+    Pid, Uid,
+};
+#[cfg(target_os = "macos")]
 use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid,
     Pid, Uid,
@@ -168,13 +174,19 @@ fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
         OFlag::O_APPEND,
         Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
     )?;
+    // Flags are u16 on freebsd
     #[cfg(target_os = "freebsd")]
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
         Mode::from_bits(OFlag::O_RDWR.bits() as u16).unwrap(),
     )?;
-
+    #[cfg(target_os = "macos")]
+    let devnull_fd = open(
+        Path::new("/dev/null"),
+        OFlag::O_APPEND,
+        Mode::from_bits(OFlag::O_RDWR.bits() as u16).unwrap(),
+    )?;
     let proc_stream = |fd, stdio: &Stdio| {
         close(fd).unwrap();
         match &stdio.inner {
@@ -253,7 +265,7 @@ impl Daemon {
         self.stderr = stdio.into();
         self
     }
-
+    /// Using the parameters set daemonize the process
     pub fn start(self) -> Result<()> {
         let pid: Pid;
         // resolve options to concrete values to please the borrow checker
@@ -262,7 +274,6 @@ impl Daemon {
             Some(path) => path.clone(),
             None => Path::new("").to_path_buf(),
         };
-
         // Set up stream redirection as early as possible
         redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
         if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
@@ -287,7 +298,8 @@ impl Daemon {
         #[cfg(target_os = "linux")]
         umask(Mode::from_bits(self.umask as u32).unwrap());
         #[cfg(target_os = "freebsd")]
-        umask(Mode::from_bits(self.umask as u16).unwrap());
+        // On free bsd this value is a u16
+        umask(Mode::from_bits(self.umask).unwrap());
         // Set the sid so the process isn't session orphan
         setsid().expect("failed to setsid");
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
@@ -320,6 +332,7 @@ impl Daemon {
                 Ok(_) => (),
                 Err(e) => return Err(anyhow!("failed to setgid to {} with error {}", &gr, e)),
             };
+            #[cfg(not(target_os = "macos"))]
             match initgroups(CString::new(uname)?.as_ref(), gr) {
                 Ok(_) => (),
                 Err(e) => {
