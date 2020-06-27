@@ -1,4 +1,4 @@
-# daemonize-me ![Rust](https://github.com/CardinalBytes/daemonize-me/workflows/Rust/badge.svg)
+# daemonize-me ![Rust](https://github.com/CardinalBytes/daemonize-me/workflows/Rust/badge.svg) ![Crates.io](https://img.shields.io/crates/v/daemonize-me) ![Crates.io](https://img.shields.io/crates/l/daemonize-me) ![Crates.io](https://img.shields.io/crates/d/daemonize-me)
 Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
 
 I just reached a mature enough point to call this code usable as it is now doing what it should (it still needs better testing however).
