@@ -162,6 +162,13 @@ pub struct Daemon {
 }
 
 fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    let devnull_fd = open(
+        Path::new("/dev/null"),
+        OFlag::O_APPEND,
+        Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
+    )?;
+    #[cfg(target_os = "freebsd")]
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
