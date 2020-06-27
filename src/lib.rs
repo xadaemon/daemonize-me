@@ -1,16 +1,17 @@
 /// example usage
 /// ```
 /// extern crate daemonize_me;
-/// use daemonize_me::Daemon;
 /// use std::fs::File;
+/// use daemonize_me::{Daemon, Group, User};
+/// use std::convert::TryFrom;
 ///
 /// fn main() {
 ///     let stdout = File::create("info.log").unwrap();
 ///     let stderr = File::create("err.log").unwrap();
 ///     let daemon = Daemon::new()
 ///         .pid_file("example.pid", Some(false))
-///         .user("daemon")
-///         .group("daemon")
+///        .user(User::try_from("daemon").unwrap())
+///         .group(Group::try_from("daemon").unwrap())
 ///         .umask(0o000)
 ///         .work_dir(".")
 ///         .stdout(stdout)
@@ -42,6 +43,7 @@ use nix::unistd::{
 use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
+use std::convert::TryFrom;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::prelude::*;
@@ -56,19 +58,25 @@ pub enum User {
     Id(u32),
 }
 
-impl<'uname> From<&'uname str> for User {
-    fn from(uname: &'uname str) -> User {
-        User::Id(PasswdRecord::get_record_by_name(uname).unwrap().pw_uid)
+impl<'uname> TryFrom<&'uname str> for User {
+    type Error = &'static str;
+
+    fn try_from(uname: &'uname str) -> Result<User, Self::Error> {
+        match PasswdRecord::get_record_by_name(uname) {
+            Ok(record) => Ok(User::Id(record.pw_uid)),
+            Err(_) => Err("Could not retrieve uid from username"),
+        }
     }
 }
 
-impl From<String> for User {
-    fn from(uname: String) -> User {
-        User::Id(
-            PasswdRecord::get_record_by_name(uname.as_str())
-                .unwrap()
-                .pw_uid,
-        )
+impl TryFrom<String> for User {
+    type Error = &'static str;
+
+    fn try_from(uname: String) -> Result<User, Self::Error> {
+        match PasswdRecord::get_record_by_name(uname.as_str()) {
+            Ok(record) => Ok(User::Id(record.pw_uid)),
+            Err(_) => Err("Could not retrieve uid from username"),
+        }
     }
 }
 
@@ -85,19 +93,25 @@ pub enum Group {
     Id(u32),
 }
 
-impl<'uname> From<&'uname str> for Group {
-    fn from(gname: &'uname str) -> Group {
-        Group::Id(GroupRecord::get_record_by_name(gname).unwrap().gr_gid)
+impl<'uname> TryFrom<&'uname str> for Group {
+    type Error = &'static str;
+
+    fn try_from(gname: &'uname str) -> Result<Group, Self::Error> {
+        match GroupRecord::get_record_by_name(gname) {
+            Ok(record) => Ok(Group::Id(record.gr_gid)),
+            Err(_) => Err("Could not retrieve group id from name"),
+        }
     }
 }
 
-impl From<String> for Group {
-    fn from(gname: String) -> Group {
-        Group::Id(
-            GroupRecord::get_record_by_name(gname.as_str())
-                .unwrap()
-                .gr_gid,
-        )
+impl TryFrom<String> for Group {
+    type Error = &'static str;
+
+    fn try_from(gname: String) -> Result<Group, Self::Error> {
+        match GroupRecord::get_record_by_name(gname.as_str()) {
+            Ok(record) => Ok(Group::Id(record.gr_gid)),
+            Err(_) => Err("Could not retrieve group id from name"),
+        }
     }
 }
 
@@ -171,20 +185,7 @@ fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
-        Mode::from_bits(OFlag::O_RDWR.bits() as u32).unwrap(),
-    )?;
-    // Flags are u16 on freebsd
-    #[cfg(target_os = "freebsd")]
-    let devnull_fd = open(
-        Path::new("/dev/null"),
-        OFlag::O_APPEND,
-        Mode::from_bits(OFlag::O_RDWR.bits() as u16).unwrap(),
-    )?;
-    #[cfg(target_os = "macos")]
-    let devnull_fd = open(
-        Path::new("/dev/null"),
-        OFlag::O_APPEND,
-        Mode::from_bits(OFlag::O_RDWR.bits() as u16).unwrap(),
+        Mode::from_bits(OFlag::O_RDWR.bits() as _).unwrap(), // Mode this in this situation is infallible (maybe use unchecked version)
     )?;
     let proc_stream = |fd, stdio: &Stdio| {
         close(fd).unwrap();
@@ -294,11 +295,11 @@ impl Daemon {
             Err(_) => return Err(anyhow!("Failed to fork")),
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
-        #[cfg(target_os = "linux")]
-        umask(Mode::from_bits(self.umask as u32).unwrap());
-        #[cfg(target_os = "freebsd")]
-        // On free bsd this value is a u16
-        umask(Mode::from_bits(self.umask).unwrap());
+        let umask_mode = match Mode::from_bits(self.umask as _) {
+            Some(mode) => mode,
+            None => return Err(anyhow!("umask is invalid")),
+        };
+        umask(umask_mode);
         // Set the sid so the process isn't session orphan
         setsid().expect("failed to setsid");
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
@@ -373,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_uname_to_uid_resolution() {
-        let daemon = Daemon::new().user("root");
+        let daemon = Daemon::new().user(User::try_from("root").unwrap());
         assert!(daemon.user.is_some());
         let uid = match daemon.user.unwrap() {
             User::Id(id) => id,
