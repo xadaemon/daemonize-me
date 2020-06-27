@@ -181,26 +181,34 @@ pub struct Daemon {
 }
 
 fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
-    #[cfg(target_os = "linux")]
     let devnull_fd = open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
-        Mode::from_bits(OFlag::O_RDWR.bits() as _).unwrap(), // Mode this in this situation is infallible (maybe use unchecked version)
+        Mode::from_bits(OFlag::O_RDWR.bits() as _).unwrap(),
     )?;
     let proc_stream = |fd, stdio: &Stdio| {
-        close(fd).unwrap();
-        match &stdio.inner {
-            StdioImp::Devnull => return dup2(devnull_fd, fd).unwrap(),
+        match close(fd) {
+            Ok(_) => (),
+            Err(_) => return Err(anyhow!("Failed to close stdio stream")),
+        };
+        return match &stdio.inner {
+            StdioImp::Devnull => match dup2(devnull_fd, fd) {
+                Ok(_) => Ok(()),
+                Err(_) => Err(anyhow!("Failed to redirect stream to /dev/null")),
+            },
             StdioImp::RedirectToFile(file) => {
                 let raw_fd = file.as_raw_fd();
-                return dup2(raw_fd, fd).unwrap();
+                match dup2(raw_fd, fd) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(anyhow!("Failed to redirect stream to file")),
+                }
             }
-        }
+        };
     };
 
-    proc_stream(libc::STDIN_FILENO, stdin);
-    proc_stream(libc::STDOUT_FILENO, stdout);
-    proc_stream(libc::STDERR_FILENO, stderr);
+    proc_stream(libc::STDIN_FILENO, stdin)?;
+    proc_stream(libc::STDOUT_FILENO, stdout)?;
+    proc_stream(libc::STDERR_FILENO, stderr)?;
 
     Ok(())
 }
