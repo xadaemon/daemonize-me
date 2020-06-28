@@ -27,10 +27,8 @@
 mod ffi;
 mod util;
 
-extern crate anyhow;
 extern crate libc;
 extern crate nix;
-use anyhow::{anyhow, Result};
 use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
@@ -44,12 +42,87 @@ use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
 use std::convert::TryFrom;
+use std::error::Error;
 use std::ffi::CString;
+use std::fmt;
+use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+
+#[derive(Debug, PartialOrd, PartialEq, Clone)]
+pub enum DaemonError {
+    /// Unable to fork
+    Fork,
+    /// Failed to chdir
+    ChDir,
+    /// Failed to open dev null
+    OpenDevNull,
+    /// Failed to close the file pointer of a stdio stream
+    CloseFp,
+    /// Invalid or nonexistent user
+    InvalidUser,
+    /// Invalid or nonexistent group
+    InvalidGroup,
+    /// Either group or user was specified but no the other
+    InvalidUserGroupPair,
+    /// Failed to execute initgroups
+    InitGroups,
+    /// Failed to set uid
+    SetUid,
+    /// Failed to set gid
+    SetGid,
+    /// Failed to chown the pid file
+    ChownPid,
+    /// Failed to create the pid file
+    OpenPid,
+    /// Failed to write to the pid file
+    WritePid,
+    /// Failed to redirect the standard streams
+    RedirectStream,
+    /// Umask bits are invalid
+    InvalidUmaskBits,
+    /// Failed to set sid
+    SetSid,
+    #[doc(hidden)]
+    __Nonexhaustive,
+}
+
+impl DaemonError {
+    fn __description(&self) -> &str {
+        match *self {
+            DaemonError::Fork => "Unable to fork",
+            DaemonError::ChDir => "Failed to chdir",
+            DaemonError::OpenDevNull => "Failed to open dev null",
+            DaemonError::CloseFp => "Failed to close the file pointer of a stdio stream",
+            DaemonError::InvalidUser => "Invalid or nonexistent user",
+            DaemonError::InvalidGroup => "Invalid or nonexistent group",
+            DaemonError::InvalidUserGroupPair => {
+                "Either group or user was specified but no the other"
+            }
+            DaemonError::InitGroups => "Failed to execute initgroups",
+            DaemonError::SetUid => "Failed to set uid",
+            DaemonError::SetGid => "Failed to set gid",
+            DaemonError::ChownPid => "Failed to chown the pid file",
+            DaemonError::OpenPid => "Failed to create the pid file",
+            DaemonError::WritePid => "Failed to write to the pid file",
+            DaemonError::RedirectStream => "Failed to redirect the standard streams",
+            DaemonError::InvalidUmaskBits => "Umask bits are invalid",
+            DaemonError::SetSid => "Failed to set sid",
+            DaemonError::__Nonexhaustive => unreachable!(),
+        }
+    }
+}
+
+impl Display for DaemonError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        std::fmt::Debug::fmt(&self.__description(), f)
+    }
+}
+impl Error for DaemonError {}
+pub type Result<T> = std::result::Result<T, DaemonError>;
 
 /// Expects: either the username or the uid
 /// if the name is provided it will be resolved to an id
@@ -59,23 +132,23 @@ pub enum User {
 }
 
 impl<'uname> TryFrom<&'uname str> for User {
-    type Error = &'static str;
+    type Error = DaemonError;
 
-    fn try_from(uname: &'uname str) -> Result<User, Self::Error> {
+    fn try_from(uname: &'uname str) -> Result<User> {
         match PasswdRecord::get_record_by_name(uname) {
             Ok(record) => Ok(User::Id(record.pw_uid)),
-            Err(_) => Err("Could not retrieve uid from username"),
+            Err(_) => Err(DaemonError::InvalidUser),
         }
     }
 }
 
 impl TryFrom<String> for User {
-    type Error = &'static str;
+    type Error = DaemonError;
 
-    fn try_from(uname: String) -> Result<User, Self::Error> {
+    fn try_from(uname: String) -> Result<User> {
         match PasswdRecord::get_record_by_name(uname.as_str()) {
             Ok(record) => Ok(User::Id(record.pw_uid)),
-            Err(_) => Err("Could not retrieve uid from username"),
+            Err(_) => Err(DaemonError::InvalidUser),
         }
     }
 }
@@ -94,23 +167,23 @@ pub enum Group {
 }
 
 impl<'uname> TryFrom<&'uname str> for Group {
-    type Error = &'static str;
+    type Error = DaemonError;
 
-    fn try_from(gname: &'uname str) -> Result<Group, Self::Error> {
+    fn try_from(gname: &'uname str) -> Result<Group> {
         match GroupRecord::get_record_by_name(gname) {
             Ok(record) => Ok(Group::Id(record.gr_gid)),
-            Err(_) => Err("Could not retrieve group id from name"),
+            Err(_) => Err(DaemonError::InvalidGroup),
         }
     }
 }
 
 impl TryFrom<String> for Group {
-    type Error = &'static str;
+    type Error = DaemonError;
 
-    fn try_from(gname: String) -> Result<Group, Self::Error> {
+    fn try_from(gname: String) -> Result<Group> {
         match GroupRecord::get_record_by_name(gname.as_str()) {
             Ok(record) => Ok(Group::Id(record.gr_gid)),
-            Err(_) => Err("Could not retrieve group id from name"),
+            Err(_) => Err(DaemonError::InvalidGroup),
         }
     }
 }
@@ -181,26 +254,29 @@ pub struct Daemon {
 }
 
 fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
-    let devnull_fd = open(
+    let devnull_fd = match open(
         Path::new("/dev/null"),
         OFlag::O_APPEND,
         Mode::from_bits(OFlag::O_RDWR.bits() as _).unwrap(),
-    )?;
+    ) {
+        Ok(fd) => fd,
+        Err(_) => return Err(DaemonError::OpenDevNull),
+    };
     let proc_stream = |fd, stdio: &Stdio| {
         match close(fd) {
             Ok(_) => (),
-            Err(_) => return Err(anyhow!("Failed to close stdio stream")),
+            Err(_) => return Err(DaemonError::CloseFp),
         };
         return match &stdio.inner {
             StdioImp::Devnull => match dup2(devnull_fd, fd) {
                 Ok(_) => Ok(()),
-                Err(_) => Err(anyhow!("Failed to redirect stream to /dev/null")),
+                Err(_) => Err(DaemonError::RedirectStream),
             },
             StdioImp::RedirectToFile(file) => {
                 let raw_fd = file.as_raw_fd();
                 match dup2(raw_fd, fd) {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(anyhow!("Failed to redirect stream to file")),
+                    Err(_) => Err(DaemonError::RedirectStream),
                 }
             }
         };
@@ -285,40 +361,45 @@ impl Daemon {
         // Set up stream redirection as early as possible
         redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
         if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
-            return Err(anyhow!(
-                "You can't chmod the pid file without providing user and group"
-            ));
+            return Err(DaemonError::InvalidUserGroupPair);
         } else if (self.user.is_some() || self.group.is_some())
             && (self.user.is_none() || self.group.is_none())
         {
-            return Err(anyhow!(
-                "If you provide a user or group the other must be provided too"
-            ));
+            return Err(DaemonError::InvalidUserGroupPair);
         }
         // Fork and if the process is the parent exit gracefully
         // if the  process is the child just continue execution
         match fork() {
             Ok(ForkResult::Parent { child: _ }) => exit(0),
             Ok(ForkResult::Child) => (),
-            Err(_) => return Err(anyhow!("Failed to fork")),
+            Err(_) => return Err(DaemonError::Fork),
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
         let umask_mode = match Mode::from_bits(self.umask as _) {
             Some(mode) => mode,
-            None => return Err(anyhow!("umask is invalid")),
+            None => return Err(DaemonError::InvalidUmaskBits),
         };
         umask(umask_mode);
         // Set the sid so the process isn't session orphan
-        setsid().expect("failed to setsid");
+        if let Err(_) = setsid() {
+            return Err(DaemonError::SetSid);
+        };
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
-            return Err(anyhow!("failed to chdir"));
+            return Err(DaemonError::ChDir);
         };
         pid = getpid();
         // create pid file and if configured to, chmod it
         if has_pid_file {
             // chmod of the pid file is deferred to after checking for the presence of the user and group
             let pid_file = &pid_file_path;
-            File::create(pid_file)?.write_all(pid.to_string().as_ref())?;
+            match File::create(pid_file) {
+                Ok(mut fp) => {
+                    if let Err(_) = fp.write_all(pid.to_string().as_ref()) {
+                        return Err(DaemonError::WritePid);
+                    }
+                }
+                Err(_) => return Err(DaemonError::WritePid),
+            };
         }
         // Drop privileges and chown the requested files
         if self.user.is_some() && self.group.is_some() {
@@ -326,48 +407,47 @@ impl Daemon {
                 User::Id(id) => Uid::from_raw(id),
             };
 
-            let uname = PasswdRecord::get_record_by_id(user.as_raw())?.pw_name;
+            let uname = match PasswdRecord::get_record_by_id(user.as_raw()) {
+                Ok(record) => record.pw_name,
+                Err(_) => return Err(DaemonError::InvalidUser),
+            };
 
             let gr = match self.group.unwrap() {
                 Group::Id(id) => Gid::from_raw(id),
             };
 
             if self.chown_pid_file && has_pid_file {
-                chown(&pid_file_path, Some(user), Some(gr))?;
+                match chown(&pid_file_path, Some(user), Some(gr)) {
+                    Ok(_) => (),
+                    Err(_) => return Err(DaemonError::ChownPid),
+                };
             }
 
             match setgid(gr) {
                 Ok(_) => (),
-                Err(e) => return Err(anyhow!("failed to setgid to {} with error {}", &gr, e)),
+                Err(_) => return Err(DaemonError::SetGid),
             };
             #[cfg(not(target_os = "macos"))]
-            match initgroups(CString::new(uname)?.as_ref(), gr) {
-                Ok(_) => (),
-                Err(e) => {
-                    return Err(anyhow!(
-                        "failed to initgroups for user: {} and group: {} with error {}",
-                        user,
-                        gr,
-                        e
-                    ))
-                }
-            };
+            {
+                let u_cstr = match CString::new(uname) {
+                    Ok(cstr) => cstr,
+                    Err(_) => return Err(DaemonError::SetGid),
+                };
+                match initgroups(&u_cstr, gr) {
+                    Ok(_) => (),
+                    Err(_) => return Err(DaemonError::InitGroups),
+                };
+            }
             match setuid(user) {
                 Ok(_) => (),
-                Err(e) => return Err(anyhow!("failed to setuid to {} with error {}", user, e)),
+                Err(_) => return Err(DaemonError::SetUid),
             }
         }
         // chdir
         let chdir_path = self.chdir.to_owned();
         match chdir::<Path>(chdir_path.as_ref()) {
             Ok(_) => (),
-            Err(e) => {
-                return Err(anyhow!(
-                    "Failed to chdir to {} with error {}",
-                    chdir_path.as_path().display(),
-                    e
-                ))
-            }
+            Err(_) => return Err(DaemonError::ChDir),
         };
         // Now this process should be a daemon, return
         Ok(())

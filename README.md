@@ -32,7 +32,7 @@ fn main() {
 }
 ```
 
-# OS support
+## OS support
 I will try to keep support for linux, freebsd and macos
 
 | os | tier |
@@ -43,7 +43,16 @@ I will try to keep support for linux, freebsd and macos
 
 For tier 1 any code that breaks the tests and or ci/cd is blocking for a release, 
 tier 2 compilation errors are release blocking, tier 3 are supported on a best effort basis,
-and build failure as well as test failures are not blocking.  
+and build failure as well as test failures are not blocking.
+
+## Supported Versions
+
+Version support is as follows during this highly volatile initial development period:
+
+| Version | Supported          |
+| ------- | ------------------ |
+| master | Master is bleeding edge and thus inherently unstable |
+| tagged versions | a tagged version until a stable release due to code volatility unless stated otherwise is unsupported |  
 
 # License
 

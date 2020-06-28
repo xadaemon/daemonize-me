@@ -1,11 +1,12 @@
 [package]
 name = "daemonize-me"
-version = "0.2.1-pre"
+version = "0.2.1"
 authors = ["Matheus Xavier <mxavier@mail.cmdforge.com>"]
 edition = "2018"
 license = "BSD-3-Clause/Apache-2.0"
 repository = "https://github.com/CardinalBytes/daemonize-me"
 description = "Rust library to ease the task of creating daemons on unix-like systems"
+readme = "README.md"
 keywords = ["daemon", "daemonize", "daemonize-me", "unix"]
 categories = ["os::unix-apis"]
 
