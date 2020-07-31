@@ -1,7 +1,8 @@
-extern crate anyhow;
+// extern crate anyhow;
 extern crate libc;
 
-use anyhow::{anyhow, Context, Result};
+use crate::DaemonError::GetPasswdRecord;
+use crate::{DaemonError, Result};
 use std::ffi::{CStr, CString};
 
 #[repr(C)]
@@ -56,22 +57,24 @@ pub struct PasswdRecord {
 #[allow(dead_code)]
 impl GroupRecord {
     pub fn get_record_by_name(name: &str) -> Result<GroupRecord> {
-        let record_name =
-            CString::new(name).with_context(|| format!("Failed to create cstr from {}", name))?;
+        let record_name = match CString::new(name) {
+            Ok(s) => s,
+            Err(_) => return Err(DaemonError::InvalidCstr),
+        };
 
         unsafe {
             let raw_passwd = getgrnam(record_name.as_ptr());
-            if raw_passwd.is_null() {
-                return Err(anyhow!("Failed to retrieve the records"));
+            return if raw_passwd.is_null() {
+                Err(DaemonError::GetGrRecord)
             } else {
                 let gr = &*raw_passwd;
                 let sgr = GroupRecord {
-                    gr_name: CStr::from_ptr(gr.gr_name).to_str()?.to_string(),
-                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_str()?.to_string(),
+                    gr_name: CStr::from_ptr(gr.gr_name).to_string_lossy().to_string(),
+                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_string_lossy().to_string(),
                     gr_gid: gr.gr_gid as u32,
                 };
-                return Ok(sgr);
-            }
+                Ok(sgr)
+            };
         };
     }
     pub fn get_record_by_id(gid: u32) -> Result<GroupRecord> {
@@ -79,43 +82,45 @@ impl GroupRecord {
 
         unsafe {
             let raw_passwd = getgrgid(record_id);
-            if raw_passwd.is_null() {
-                return Err(anyhow!("Failed to retrieve the records"));
+            return if raw_passwd.is_null() {
+                Err(DaemonError::GetGrRecord)
             } else {
                 let gr = &*raw_passwd;
                 let sgr = GroupRecord {
-                    gr_name: CStr::from_ptr(gr.gr_name).to_str()?.to_string(),
-                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_str()?.to_string(),
+                    gr_name: CStr::from_ptr(gr.gr_name).to_string_lossy().to_string(),
+                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_string_lossy().to_string(),
                     gr_gid: gr.gr_gid as u32,
                 };
-                return Ok(sgr);
-            }
+                Ok(sgr)
+            };
         };
     }
 }
 
 impl PasswdRecord {
     pub fn get_record_by_name(name: &str) -> Result<PasswdRecord> {
-        let record_name =
-            CString::new(name).with_context(|| format!("Failed to create cstr from {}", name))?;
+        let record_name = match CString::new(name) {
+            Ok(s) => s,
+            Err(_) => return Err(DaemonError::InvalidCstr),
+        };
 
         unsafe {
             let raw_passwd = getpwnam(record_name.as_ptr());
-            if raw_passwd.is_null() {
-                return Err(anyhow!("Failed to retrieve the records"));
+            return if raw_passwd.is_null() {
+                Err(GetPasswdRecord)
             } else {
                 let pw = &*raw_passwd;
                 let pwr = PasswdRecord {
-                    pw_name: CStr::from_ptr(pw.pw_name).to_str()?.to_string(),
-                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_str()?.to_string(),
+                    pw_name: CStr::from_ptr(pw.pw_name).to_string_lossy().to_string(),
+                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_string_lossy().to_string(),
                     pw_uid: pw.pw_uid as u32,
                     pw_gid: pw.pw_gid as u32,
-                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_str()?.to_string(),
-                    pw_dir: CStr::from_ptr(pw.pw_dir).to_str()?.to_string(),
-                    pw_shell: CStr::from_ptr(pw.pw_shell).to_str()?.to_string(),
+                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_string_lossy().to_string(),
+                    pw_dir: CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string(),
+                    pw_shell: CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string(),
                 };
-                return Ok(pwr);
-            }
+                Ok(pwr)
+            };
         };
     }
     pub fn get_record_by_id(uid: u32) -> Result<PasswdRecord> {
@@ -123,21 +128,21 @@ impl PasswdRecord {
 
         unsafe {
             let raw_passwd = getpwuid(record_id);
-            if raw_passwd.is_null() {
-                return Err(anyhow!("Failed to retrieve the records"));
+            return if raw_passwd.is_null() {
+                Err(DaemonError::GetPasswdRecord)
             } else {
                 let pw = &*raw_passwd;
                 let pwr = PasswdRecord {
-                    pw_name: CStr::from_ptr(pw.pw_name).to_str()?.to_string(),
-                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_str()?.to_string(),
+                    pw_name: CStr::from_ptr(pw.pw_name).to_string_lossy().to_string(),
+                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_string_lossy().to_string(),
                     pw_uid: pw.pw_uid as u32,
                     pw_gid: pw.pw_gid as u32,
-                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_str()?.to_string(),
-                    pw_dir: CStr::from_ptr(pw.pw_dir).to_str()?.to_string(),
-                    pw_shell: CStr::from_ptr(pw.pw_shell).to_str()?.to_string(),
+                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_string_lossy().to_string(),
+                    pw_dir: CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string(),
+                    pw_shell: CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string(),
                 };
-                return Ok(pwr);
-            }
+                Ok(pwr)
+            };
         };
     }
 }

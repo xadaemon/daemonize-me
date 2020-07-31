@@ -41,18 +41,17 @@ use nix::unistd::{
 use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
+use snafu::Snafu;
 use std::convert::TryFrom;
-use std::error::Error;
 use std::ffi::CString;
-use std::fmt;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-#[derive(Debug, PartialOrd, PartialEq, Clone)]
+#[derive(Debug, Snafu)]
 pub enum DaemonError {
     /// Unable to fork
     Fork,
@@ -68,6 +67,8 @@ pub enum DaemonError {
     InvalidGroup,
     /// Either group or user was specified but no the other
     InvalidUserGroupPair,
+    /// The specified cstr is invalid
+    InvalidCstr,
     /// Failed to execute initgroups
     InitGroups,
     /// Failed to set uid
@@ -86,42 +87,14 @@ pub enum DaemonError {
     InvalidUmaskBits,
     /// Failed to set sid
     SetSid,
+    // Failed to get groups record
+    GetGrRecord,
+    /// Failed to get passwd record
+    GetPasswdRecord,
     #[doc(hidden)]
     __Nonexhaustive,
 }
 
-impl DaemonError {
-    fn __description(&self) -> &str {
-        match *self {
-            DaemonError::Fork => "Unable to fork",
-            DaemonError::ChDir => "Failed to chdir",
-            DaemonError::OpenDevNull => "Failed to open dev null",
-            DaemonError::CloseFp => "Failed to close the file pointer of a stdio stream",
-            DaemonError::InvalidUser => "Invalid or nonexistent user",
-            DaemonError::InvalidGroup => "Invalid or nonexistent group",
-            DaemonError::InvalidUserGroupPair => {
-                "Either group or user was specified but no the other"
-            }
-            DaemonError::InitGroups => "Failed to execute initgroups",
-            DaemonError::SetUid => "Failed to set uid",
-            DaemonError::SetGid => "Failed to set gid",
-            DaemonError::ChownPid => "Failed to chown the pid file",
-            DaemonError::OpenPid => "Failed to create the pid file",
-            DaemonError::WritePid => "Failed to write to the pid file",
-            DaemonError::RedirectStream => "Failed to redirect the standard streams",
-            DaemonError::InvalidUmaskBits => "Umask bits are invalid",
-            DaemonError::SetSid => "Failed to set sid",
-            DaemonError::__Nonexhaustive => unreachable!(),
-        }
-    }
-}
-
-impl Display for DaemonError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        std::fmt::Debug::fmt(&self.__description(), f)
-    }
-}
-impl Error for DaemonError {}
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
 /// Expects: either the username or the uid

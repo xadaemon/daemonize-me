@@ -22,6 +22,6 @@ fn main() {
 
     match daemon {
         Ok(_) => println!("Daemonized with success"),
-        Err(e) => eprintln!("Error, {}", e),
+        Err(e) => eprintln!("Error, {:?}", e),
     }
 }
