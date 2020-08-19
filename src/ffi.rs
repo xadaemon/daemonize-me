@@ -1,3 +1,4 @@
+#![deny(warnings)]
 // extern crate anyhow;
 extern crate libc;
 

@@ -5,6 +5,10 @@ I just reached a mature enough point to call this code usable as it is now doing
 This being said, I'm electing to release the library in a first version as is and keep improving it.
 
 # Basic usage
+Add it to your cargo.toml this will add the whole 0.3.x series as compatible as per semver
+```
+daemonize-me = "0.3"
+```
 Example:
 ```rust
 extern crate daemonize_me;
@@ -40,10 +44,13 @@ I will try to keep support for linux, freebsd and macos
 | linux | tier 1 |
 | freebsd, netbsd | tier 2 |
 | macos, unix, *nix | tier 3 |
+| Anything non unix | not supported |
 
 For tier 1 any code that breaks the tests and or ci/cd is blocking for a release, 
 tier 2 compilation errors are release blocking, tier 3 are supported on a best effort basis,
 and build failure as well as test failures are not blocking.
+
+note on custom/hobby OS support, if your os implements the syscalls used in lib.rs then this library is likely to work.
 
 ## Supported Versions
 
@@ -52,7 +59,7 @@ Version support is as follows during this highly volatile initial development pe
 | Version | Supported          |
 | ------- | ------------------ |
 | master | Master is bleeding edge and thus inherently unstable |
-| tagged versions | a tagged version until a stable release due to code volatility unless stated otherwise is unsupported |  
+| 0.3.x | This is the first stable version as long as it is feasible and until 1.0.0 lands it will be supported |  
 
 # License
 

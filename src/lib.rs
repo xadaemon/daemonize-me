@@ -1,31 +1,12 @@
-/// example usage
-/// ```
-/// extern crate daemonize_me;
-/// use std::fs::File;
-/// use daemonize_me::{Daemon, Group, User};
-/// use std::convert::TryFrom;
-///
-/// fn main() {
-///     let stdout = File::create("info.log").unwrap();
-///     let stderr = File::create("err.log").unwrap();
-///     let daemon = Daemon::new()
-///         .pid_file("example.pid", Some(false))
-///        .user(User::try_from("daemon").unwrap())
-///         .group(Group::try_from("daemon").unwrap())
-///         .umask(0o000)
-///         .work_dir(".")
-///         .stdout(stdout)
-///         .stderr(stderr)
-///         .start();
-///
-///     match daemon {
-///         Ok(_) => println!("Daemonized with success"),
-///         Err(e) => eprintln!("Error, {}", e),
-///     }
-/// }
-/// ```
+#![deny(warnings)]
+#![deny(clippy::complexity)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::needless_pass_by_value)]
+#![deny(clippy::trivially_copy_pass_by_ref)]
+
 mod ffi;
-mod sig_handler;
 
 extern crate libc;
 extern crate nix;

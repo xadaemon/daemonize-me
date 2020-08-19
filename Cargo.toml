@@ -1,6 +1,6 @@
 [package]
 name = "daemonize-me"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Matheus Xavier <mxavier@mail.cmdforge.com>"]
 edition = "2018"
 license = "BSD-3-Clause/Apache-2.0"
