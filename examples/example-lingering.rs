@@ -25,5 +25,6 @@ fn main() {
         Err(e) => eprintln!("Error, {}", e),
     }
     // use infinite loop to keep process open for inspection
+    println!("Hello from the daemon");
     loop {}
 }

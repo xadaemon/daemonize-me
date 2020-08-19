@@ -25,7 +25,7 @@
 /// }
 /// ```
 mod ffi;
-mod util;
+mod sig_handler;
 
 extern crate libc;
 extern crate nix;
@@ -87,7 +87,7 @@ pub enum DaemonError {
     InvalidUmaskBits,
     /// Failed to set sid
     SetSid,
-    // Failed to get groups record
+    /// Failed to get groups record
     GetGrRecord,
     /// Failed to get passwd record
     GetPasswdRecord,
