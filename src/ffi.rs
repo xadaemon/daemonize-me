@@ -1,10 +1,15 @@
 #![deny(warnings)]
-// extern crate anyhow;
 extern crate libc;
 
-use crate::DaemonError::GetPasswdRecord;
 use crate::{DaemonError, Result};
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsStr, OsString};
+use libc::{prctl, PR_SET_NAME};
+#[cfg(target_os = "linux")]
+use crate::DaemonError::{GetPasswdRecord, SetProcName};
+#[cfg(not(target_os = "linux"))]
+use crate::DaemonError::{GetPasswdRecord, SetProcName, UnsupportedOnOS};
+use std::os::unix::ffi::OsStrExt;
+use crate::DaemonError::InvalidProcName;
 
 #[repr(C)]
 #[allow(dead_code)]
@@ -148,10 +153,32 @@ impl PasswdRecord {
     }
 }
 
+#[cfg(target_os = "linux")]
+/// Safe wrapper to the prctl(2) call
+pub fn set_proc_name(name: &OsStr) -> Result<()> {
+    let name_truncated = match CString::new(OsString::from(name).as_bytes()) {
+        Ok(procname) => procname,
+        Err(_) => return Err(InvalidProcName),
+    };
+    unsafe {
+        if prctl(PR_SET_NAME, name_truncated.as_bytes_with_nul()) < 0 {
+            Err(SetProcName)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_proc_name(name: &OsStr) -> Result<()> {
+    Err(UnsupportedOnOS)
+}
+
 #[cfg(test)]
 mod tests {
     // TODO: Improve testing because of unsafe code
     use super::*;
+
     #[test]
     /// Asserts if the uid returned for the uname "root" is 0
     fn test_passwd_by_name() {

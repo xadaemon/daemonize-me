@@ -24,16 +24,19 @@ use nix::unistd::{
 };
 use snafu::Snafu;
 use std::convert::TryFrom;
-use std::ffi::CString;
+use std::ffi::{CString, OsString, OsStr};
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use crate::ffi::set_proc_name;
 
 #[derive(Debug, Snafu)]
 pub enum DaemonError {
+    /// This feature is unavailable or not implemented to your target os
+    UnsupportedOnOS,
     /// Unable to fork
     Fork,
     /// Failed to chdir
@@ -72,6 +75,9 @@ pub enum DaemonError {
     GetGrRecord,
     /// Failed to get passwd record
     GetPasswdRecord,
+    /// Failed to set proc name
+    SetProcName,
+    InvalidProcName,
     #[doc(hidden)]
     __Nonexhaustive,
 }
@@ -184,17 +190,15 @@ impl From<File> for Stdio {
 /// * user [optional], if set will drop privileges to the specified user **NOTE**: This library is strict and makes no assumptions if you provide a user you must provide a group  
 /// * group [optional(**see note on user**)], if set will drop privileges to specified group
 /// * umask [optional], umask for the process defaults to 0o027
-/// * pid_file [optional], if set a pid file will be created default is that no file is created <sup>*</sup>
+/// * pid_file [optional], if set a pid file will be created default is that no file is created *
 /// * stdio [optional][**recommended**], this determines where standard output will be piped to since daemons have no console it's highly recommended to set this
 /// * stderr [optional][**recommended**], same as above but for standard error
 /// * chdir [optional], default is "/"
+/// * name [optional], set the daemon process name eg what shows in `ps` default is to not set a process name
 ///
-/// <sup>*</sup> See the setter function documentation for more details
+/// * See the setter function documentation for more details
 ///
 /// **Beware there is no escalation back if dropping privileges**
-/// TODO:
-/// * [ ] Add chroot option
-/// * [ ] Add before drop lambda
 pub struct Daemon {
     chdir: PathBuf,
     pid_file: Option<PathBuf>,
@@ -205,6 +209,7 @@ pub struct Daemon {
     stdin: Stdio, // stdin is practically always null
     stdout: Stdio,
     stderr: Stdio,
+    name: Option<OsString>,
 }
 
 fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
@@ -256,6 +261,7 @@ impl Daemon {
             stdin: Stdio::devnull(),
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
+            name: None,
         }
     }
 
@@ -303,7 +309,13 @@ impl Daemon {
         self.stderr = stdio.into();
         self
     }
-    /// Using the parameters set daemonize the process
+
+    pub fn name(mut self, name: &OsStr) -> Self {
+        self.name = Some(OsString::from(name));
+        self
+    }
+
+    /// Using the parameters set, daemonize the process
     pub fn start(self) -> Result<()> {
         let pid: Pid;
         // resolve options to concrete values to please the borrow checker
@@ -327,6 +339,12 @@ impl Daemon {
             Ok(ForkResult::Parent { child: _ }) => exit(0),
             Ok(ForkResult::Child) => (),
             Err(_) => return Err(DaemonError::Fork),
+        }
+        if let Some(proc_name) = &self.name {
+            match set_proc_name(proc_name.as_ref()) {
+                Ok(()) => (),
+                Err(e) => return Err(e)
+            }
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
         let umask_mode = match Mode::from_bits(self.umask as _) {
