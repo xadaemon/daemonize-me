@@ -1,15 +1,13 @@
 #![deny(warnings)]
-extern crate libc;
-
-use crate::{DaemonError, Result};
-use std::ffi::{CStr, CString, OsStr, OsString};
-use libc::{prctl, PR_SET_NAME};
+use crate::DaemonError::InvalidProcName;
 #[cfg(target_os = "linux")]
 use crate::DaemonError::{GetPasswdRecord, SetProcName};
 #[cfg(not(target_os = "linux"))]
 use crate::DaemonError::{GetPasswdRecord, SetProcName, UnsupportedOnOS};
+use crate::{DaemonError, Result};
+use libc::{prctl, PR_SET_NAME};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
-use crate::DaemonError::InvalidProcName;
 
 #[repr(C)]
 #[allow(dead_code)]

@@ -8,8 +8,7 @@
 
 mod ffi;
 
-extern crate libc;
-extern crate nix;
+use ffi::set_proc_name;
 use ffi::{GroupRecord, PasswdRecord};
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
@@ -24,14 +23,13 @@ use nix::unistd::{
 };
 use snafu::Snafu;
 use std::convert::TryFrom;
-use std::ffi::{CString, OsString, OsStr};
+use std::ffi::{CString, OsStr, OsString};
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use crate::ffi::set_proc_name;
 
 #[derive(Debug, Snafu)]
 pub enum DaemonError {
@@ -181,6 +179,10 @@ impl From<File> for Stdio {
         }
     }
 }
+enum PidType {
+    Num(u32),
+    File(PathBuf),
+}
 
 /// Basic daemonization consists of:
 /// forking the process, getting a new sid, setting the umask, changing the standard io streams
@@ -201,7 +203,7 @@ impl From<File> for Stdio {
 /// **Beware there is no escalation back if dropping privileges**
 pub struct Daemon {
     chdir: PathBuf,
-    pid_file: Option<PathBuf>,
+    pid: Option<PidType>,
     chown_pid_file: bool,
     user: Option<User>,
     group: Option<Group>,
@@ -253,7 +255,7 @@ impl Daemon {
     pub fn new() -> Self {
         Daemon {
             chdir: Path::new("/").to_owned(),
-            pid_file: None,
+            pid: None,
             chown_pid_file: false,
             user: None,
             group: None,
@@ -270,7 +272,16 @@ impl Daemon {
     /// * `path` - path to the file suggested `/var/run/my_program_name.pid`
     /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
     pub fn pid_file<T: AsRef<Path>>(mut self, path: T, chmod: Option<bool>) -> Self {
-        self.pid_file = Some(path.as_ref().to_owned());
+        self.pid = Some(PidType::File(path.as_ref().to_owned()));
+        self.chown_pid_file = chmod.unwrap_or(false);
+        self
+    }
+    /// This is a setter to give your daemon a pid number
+    /// # Arguments
+    /// * `num` - number of process(pid), create a path to file suggested `/var/run/num.pid`
+    /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
+    pub fn pid_num(mut self, num: u32, chmod: Option<bool>) -> Self {
+        self.pid = Some(PidType::Num(num));
         self.chown_pid_file = chmod.unwrap_or(false);
         self
     }
@@ -319,9 +330,14 @@ impl Daemon {
     pub fn start(self) -> Result<()> {
         let pid: Pid;
         // resolve options to concrete values to please the borrow checker
-        let has_pid_file = self.pid_file.is_some();
-        let pid_file_path = match self.pid_file {
-            Some(path) => path.clone(),
+        let has_pid_file = self.pid.is_some();
+        let pid_file_path = match self.pid {
+            Some(PidType::File(path)) => path.clone(),
+            Some(PidType::Num(num)) => {
+                let mut construct_pid_path = Path::new("/var/run/").to_path_buf();
+                construct_pid_path.push(format!("{}.pid", num));
+                construct_pid_path
+            }
             None => Path::new("").to_path_buf(),
         };
         // Set up stream redirection as early as possible
@@ -343,7 +359,7 @@ impl Daemon {
         if let Some(proc_name) = &self.name {
             match set_proc_name(proc_name.as_ref()) {
                 Ok(()) => (),
-                Err(e) => return Err(e)
+                Err(e) => return Err(e),
             }
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
