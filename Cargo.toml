@@ -15,4 +15,3 @@ categories = ["os::unix-apis"]
 [dependencies]
 libc = "0.2"
 nix = "0.17"
-snafu = "0.6.8"

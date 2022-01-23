@@ -1,15 +1,11 @@
-#![deny(warnings)]
-#![deny(clippy::complexity)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
-#![deny(clippy::panic)]
-#![deny(clippy::needless_pass_by_value)]
-#![deny(clippy::trivially_copy_pass_by_ref)]
-
+mod daemon;
 mod ffi;
+mod process;
+mod user;
 
 use ffi::set_proc_name;
 use ffi::{GroupRecord, PasswdRecord};
+use nix::errno::Errno;
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::{umask, Mode};
 #[cfg(not(target_os = "macos"))]
@@ -21,7 +17,6 @@ use nix::unistd::{
 use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
-use snafu::Snafu;
 use std::convert::TryFrom;
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt::Debug;
@@ -31,56 +26,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-#[derive(Debug, Snafu)]
-pub enum DaemonError {
-    /// This feature is unavailable or not implemented to your target os
-    UnsupportedOnOS,
-    /// Unable to fork
-    Fork,
-    /// Failed to chdir
-    ChDir,
-    /// Failed to open dev null
-    OpenDevNull,
-    /// Failed to close the file pointer of a stdio stream
-    CloseFp,
-    /// Invalid or nonexistent user
-    InvalidUser,
-    /// Invalid or nonexistent group
-    InvalidGroup,
-    /// Either group or user was specified but no the other
-    InvalidUserGroupPair,
-    /// The specified cstr is invalid
-    InvalidCstr,
-    /// Failed to execute initgroups
-    InitGroups,
-    /// Failed to set uid
-    SetUid,
-    /// Failed to set gid
-    SetGid,
-    /// Failed to chown the pid file
-    ChownPid,
-    /// Failed to create the pid file
-    OpenPid,
-    /// Failed to write to the pid file
-    WritePid,
-    /// Failed to redirect the standard streams
-    RedirectStream,
-    /// Umask bits are invalid
-    InvalidUmaskBits,
-    /// Failed to set sid
-    SetSid,
-    /// Failed to get groups record
-    GetGrRecord,
-    /// Failed to get passwd record
-    GetPasswdRecord,
-    /// Failed to set proc name
-    SetProcName,
-    InvalidProcName,
-    #[doc(hidden)]
-    __Nonexhaustive,
-}
-
-pub type Result<T> = std::result::Result<T, DaemonError>;
+pub type Result<T> = std::result::Result<T, Errno>;
 
 /// Expects: either the username or the uid
 /// if the name is provided it will be resolved to an id
@@ -90,23 +36,23 @@ pub enum User {
 }
 
 impl<'uname> TryFrom<&'uname str> for User {
-    type Error = DaemonError;
+    type Error = Errno;
 
     fn try_from(uname: &'uname str) -> Result<User> {
         match PasswdRecord::get_record_by_name(uname) {
             Ok(record) => Ok(User::Id(record.pw_uid)),
-            Err(_) => Err(DaemonError::InvalidUser),
+            Err(err) => Err(err),
         }
     }
 }
 
 impl TryFrom<String> for User {
-    type Error = DaemonError;
+    type Error = Errno;
 
     fn try_from(uname: String) -> Result<User> {
         match PasswdRecord::get_record_by_name(uname.as_str()) {
             Ok(record) => Ok(User::Id(record.pw_uid)),
-            Err(_) => Err(DaemonError::InvalidUser),
+            Err(err) => Err(err),
         }
     }
 }
@@ -125,12 +71,12 @@ pub enum Group {
 }
 
 impl<'uname> TryFrom<&'uname str> for Group {
-    type Error = DaemonError;
+    type Error = Errno;
 
     fn try_from(gname: &'uname str) -> Result<Group> {
         match GroupRecord::get_record_by_name(gname) {
             Ok(record) => Ok(Group::Id(record.gr_gid)),
-            Err(_) => Err(DaemonError::InvalidGroup),
+            Err(err) => Err(err),
         }
     }
 }
@@ -325,7 +271,6 @@ impl Daemon {
         self.name = Some(OsString::from(name));
         self
     }
-
     /// Using the parameters set, daemonize the process
     pub fn start(self) -> Result<()> {
         let pid: Pid;
