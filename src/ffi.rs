@@ -1,11 +1,6 @@
-#![deny(warnings)]
-use crate::DaemonError::InvalidProcName;
-#[cfg(target_os = "linux")]
-use crate::DaemonError::{GetPasswdRecord, SetProcName};
-#[cfg(not(target_os = "linux"))]
-use crate::DaemonError::{GetPasswdRecord, SetProcName, UnsupportedOnOS};
-use crate::{DaemonError, Result};
+use crate::Result;
 use libc::{prctl, PR_SET_NAME};
+use nix::errno::Errno;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 
@@ -63,13 +58,13 @@ impl GroupRecord {
     pub fn get_record_by_name(name: &str) -> Result<GroupRecord> {
         let record_name = match CString::new(name) {
             Ok(s) => s,
-            Err(_) => return Err(DaemonError::InvalidCstr),
+            Err(_) => return Err(Errno::last()),
         };
 
         unsafe {
             let raw_passwd = getgrnam(record_name.as_ptr());
             return if raw_passwd.is_null() {
-                Err(DaemonError::GetGrRecord)
+                Err(Errno::last())
             } else {
                 let gr = &*raw_passwd;
                 let sgr = GroupRecord {
@@ -87,7 +82,7 @@ impl GroupRecord {
         unsafe {
             let raw_passwd = getgrgid(record_id);
             return if raw_passwd.is_null() {
-                Err(DaemonError::GetGrRecord)
+                Err(Errno::last())
             } else {
                 let gr = &*raw_passwd;
                 let sgr = GroupRecord {
@@ -105,13 +100,13 @@ impl PasswdRecord {
     pub fn get_record_by_name(name: &str) -> Result<PasswdRecord> {
         let record_name = match CString::new(name) {
             Ok(s) => s,
-            Err(_) => return Err(DaemonError::InvalidCstr),
+            Err(_) => return Err(Errno::last()),
         };
 
         unsafe {
             let raw_passwd = getpwnam(record_name.as_ptr());
             return if raw_passwd.is_null() {
-                Err(GetPasswdRecord)
+                Err(Errno::last())
             } else {
                 let pw = &*raw_passwd;
                 let pwr = PasswdRecord {
@@ -133,7 +128,7 @@ impl PasswdRecord {
         unsafe {
             let raw_passwd = getpwuid(record_id);
             return if raw_passwd.is_null() {
-                Err(DaemonError::GetPasswdRecord)
+                Err(Errno::last())
             } else {
                 let pw = &*raw_passwd;
                 let pwr = PasswdRecord {
@@ -156,11 +151,11 @@ impl PasswdRecord {
 pub fn set_proc_name(name: &OsStr) -> Result<()> {
     let name_truncated = match CString::new(OsString::from(name).as_bytes()) {
         Ok(procname) => procname,
-        Err(_) => return Err(InvalidProcName),
+        Err(_) => return Err(Errno::last()),
     };
     unsafe {
         if prctl(PR_SET_NAME, name_truncated.as_bytes_with_nul()) < 0 {
-            Err(SetProcName)
+            Err(Errno::last())
         } else {
             Ok(())
         }

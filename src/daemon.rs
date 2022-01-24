@@ -22,8 +22,8 @@ use std::sync::Once;
 
 pub struct Daemon {
     name: Option<OsString>,
-    user_info: Option<UserInfo>,
-    process_info: Option<ProcessInfo>,
+    user_info: UserInfo,
+    process_info: ProcessInfo,
 }
 
 pub fn get_daemon_instance() -> &'static Daemon {
@@ -52,8 +52,8 @@ macro_rules! multiple_daemon_setters {
 impl Daemon {
     pub fn new() -> Self {
         Daemon {
-            user_info: None,
-            process_info: None,
+            user_info: UserInfo::new(),
+            process_info: ProcessInfo::new(),
             name: None,
         }
     }
@@ -63,9 +63,8 @@ impl Daemon {
     /// * `path` - path to the file suggested `/var/run/my_program_name.pid`
     /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
     pub fn pid_file<T: AsRef<Path>>(mut self, path: T, chmod: Option<bool>) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.pid = Some(PidType::File(path.as_ref().to_owned()));
-        process_info.chown_pid_file = chmod.unwrap_or(false);
+        self.process_info.pid = Some(PidType::File(path.as_ref().to_owned()));
+        self.process_info.chown_pid_file = chmod.unwrap_or(false);
         self
     }
     /// This is a setter to give your daemon a pid number
@@ -73,45 +72,41 @@ impl Daemon {
     /// * `num` - number of process(pid), create a path to file suggested `/var/run/num.pid`
     /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
     pub fn pid_num(mut self, num: u32, chmod: Option<bool>) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.pid = Some(PidType::Num(num));
-        process_info.chown_pid_file = chmod.unwrap_or(false);
+        self.process_info.pid = Some(PidType::Num(num));
+        self.process_info.chown_pid_file = chmod.unwrap_or(false);
         self
     }
     /// As the last step the code will change the working directory to this one defaults to `/`
     pub fn work_dir<T: AsRef<Path>>(mut self, path: T) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.chdir = path.as_ref().to_owned();
+        self.process_info.chdir = path.as_ref().to_owned();
         self
     }
     /// The code will attempt to drop privileges with `setuid` to the provided user
     pub fn user_info<T: Into<UserInfo>>(mut self, user: T) -> Self {
-        let mut user_info = self.user_info.unwrap();
-        user_info = user.into();
+        self.user_info = user.into();
         self
+    }
+    pub fn user(&self) -> Option<&UserInfo> {
+        Some(&self.user_info)
     }
 
     pub fn umask(mut self, mask: u16) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.umask = mask;
+        self.process_info.umask = mask;
         self
     }
 
     pub fn stdin<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.stdin = stdio.into();
+        self.process_info.stdin = stdio.into();
         self
     }
 
     pub fn stdout<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.stdout = stdio.into();
+        self.process_info.stdout = stdio.into();
         self
     }
 
     pub fn stderr<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        let mut process_info = self.process_info.unwrap();
-        process_info.stderr = stdio.into();
+        self.process_info.stderr = stdio.into();
         self
     }
 
@@ -124,9 +119,9 @@ impl Daemon {
     pub fn start(self) -> Result<()> {
         let pid: Pid;
 
-        let process_info = self.process_info.unwrap();
-        let user_info = self.user_info.unwrap();
-        let name = self.name.unwrap();
+        let process_info = self.process_info;
+        let user_info = self.user_info;
+        let name = self.name;
 
         // resolve options to concrete values to please the borrow checker
         let has_pid = process_info.have_pid();
@@ -155,7 +150,7 @@ impl Daemon {
             Ok(ForkResult::Child) => (),
             Err(_) => return Err(Errno::last()),
         }
-        if let Some(proc_name) = &self.name {
+        if let Some(proc_name) = &name {
             match set_proc_name(proc_name.as_ref()) {
                 Ok(()) => (),
                 Err(e) => return Err(e),

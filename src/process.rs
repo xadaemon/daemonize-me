@@ -32,6 +32,17 @@ impl ProcessInfo {
     pub fn have_chown_pid_file(&self) -> bool {
         self.chown_pid_file
     }
+    pub fn new() -> Self {
+        ProcessInfo {
+            chown_pid_file: false,
+            chdir: PathBuf::new(),
+            pid: None,
+            umask: 0,
+            stdin: Stdio::devnull(),
+            stdout: Stdio::devnull(),
+            stderr: Stdio::devnull(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -89,7 +100,7 @@ pub fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<(
         Err(_) => return Err(Errno::last()),
     };
 
-    let proc_stream = |fd, stdio: &Stdio| match stdio.inner {
+    let proc_stream = |fd, stdio: &Stdio| match &stdio.inner {
         StdioImp::Devnull => close_and_dub(fd, devnull_fd),
         StdioImp::RedirectToFile(file) => close_and_dub(fd, file.as_raw_fd()),
     };
