@@ -4,7 +4,7 @@ use nix::errno::Errno;
 #[cfg(not(target_os = "macos"))]
 use std::convert::TryFrom;
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct UserInfo {
     pub user: u32,
     pub group: u32,

@@ -14,7 +14,7 @@ use nix::unistd::{
 use nix::unistd::{close, dup2};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-
+#[derive(Debug)]
 pub struct ProcessInfo {
     pub chown_pid_file: bool,
     pub chdir: PathBuf,
@@ -73,6 +73,7 @@ impl From<File> for Stdio {
     }
 }
 
+#[derive(Debug)]
 pub enum PidType {
     Num(u32),
     File(PathBuf),

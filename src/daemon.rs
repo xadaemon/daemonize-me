@@ -20,6 +20,7 @@ use std::path::Path;
 use std::process::exit;
 use std::sync::Once;
 
+#[derive(Debug)]
 pub struct Daemon {
     name: Option<OsString>,
     user_info: UserInfo,
