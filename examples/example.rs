@@ -14,11 +14,12 @@ fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
         // keep parent open
     }
 }
+
 fn post_fork_child(ppid: i32, cpid: i32) {
     println!("Parent pid: {}, Child pid {}", ppid, cpid);
     println!("This hook is called in the child");
     // Child hook must return
-    return
+    return;
 }
 
 fn main() {
@@ -32,7 +33,8 @@ fn main() {
         .work_dir(".")
         .stdout(stdout)
         .stderr(stderr)
-        .setup_hooks(None, Some(post_fork_parent), Some(post_fork_child))
+        .setup_post_fork_parent_hook(post_fork_parent)
+        .setup_post_fork_child_hook(post_fork_child)
         .start();
 
     match daemon {

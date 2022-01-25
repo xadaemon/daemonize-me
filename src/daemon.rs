@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
 use std::io::prelude::*;
@@ -34,14 +35,14 @@ use crate::user::User;
 /// * stderr [optional][**recommended**], same as above but for standard error
 /// * chdir [optional], default is "/"
 /// * name [optional], set the daemon process name eg what shows in `ps` default is to not set a process name
-/// * pre_fork_hook [optional], called before the fork with the current pid as argument
-/// * post_fork_parent_hook [optional], called after the fork with the parent pid as argument, can be used to continue some work on the parent after the fork (do not return)
-/// * post_fork_child_hook [optional], called after the fork with the parent and child pid as arguments
+/// * before_fork_hook [optional], called before the fork with the current pid as argument
+/// * after_fork_parent_hook [optional], called after the fork with the parent pid as argument, can be used to continue some work on the parent after the fork (do not return)
+/// * after_fork_child_hook [optional], called after the fork with the parent and child pid as arguments
 ///
 /// * See the setter function documentation for more details
 ///
 /// **Beware there is no escalation back if dropping privileges**
-pub struct Daemon {
+pub struct Daemon<'a> {
     chdir: PathBuf,
     pid_file: Option<PathBuf>,
     chown_pid_file: bool,
@@ -53,12 +54,14 @@ pub struct Daemon {
     stdout: Stdio,
     stderr: Stdio,
     name: Option<OsString>,
-    pre_fork_hook: Option<fn(pid: i32)>,
-    post_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
-    post_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
+    before_fork_hook: Option<fn(pid: i32)>,
+    after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
+    after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
+    after_init_hook_data: Option<&'a dyn Any>,
+    after_init_hook: Option<Box<fn(Option<&'a dyn Any>)>>,
 }
 
-impl Daemon {
+impl<'a> Daemon<'a> {
     pub fn new() -> Self {
         Daemon {
             chdir: Path::new("/").to_owned(),
@@ -71,9 +74,11 @@ impl Daemon {
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
             name: None,
-            pre_fork_hook: None,
-            post_fork_parent_hook: None,
-            post_fork_child_hook: None,
+            before_fork_hook: None,
+            after_fork_parent_hook: None,
+            after_fork_child_hook: None,
+            after_init_hook_data: None,
+            after_init_hook: None,
         }
     }
 
@@ -127,18 +132,25 @@ impl Daemon {
         self
     }
 
-    pub fn setup_pre_fork_hook(mut self, pre_fork_hook: Option<fn(pid: i32)>) -> Self {
-        self.pre_fork_hook = pre_fork_hook;
+    pub fn setup_pre_fork_hook(mut self, pre_fork_hook: fn(pid: i32)) -> Self {
+        self.before_fork_hook = Some(pre_fork_hook);
         self
     }
 
-    pub fn setup_post_fork_parent_hook(mut self, post_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>) -> Self {
-        self.post_fork_parent_hook = post_fork_parent_hook;
+    pub fn setup_post_fork_parent_hook(mut self, post_fork_parent_hook: fn(parent_pid: i32, child_pid: i32) -> !) -> Self {
+        self.after_fork_parent_hook = Some(post_fork_parent_hook);
         self
     }
 
-    pub fn setup_post_fork_child_hook(mut self, post_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>) -> Self {
-        self.post_fork_child_hook = post_fork_child_hook;
+    pub fn setup_post_fork_child_hook(mut self, post_fork_child_hook: fn(parent_pid: i32, child_pid: i32) -> ()) -> Self {
+        self.after_fork_child_hook = Some(post_fork_child_hook);
+        self
+    }
+
+    pub fn setup_post_init_hook(mut self, post_fork_child_hook: fn(ctx: Option<&'a dyn Any>),
+                                data: Option<&'a dyn Any>) -> Self {
+        self.after_init_hook = Some(Box::new(post_fork_child_hook));
+        self.after_init_hook_data = data;
         self
     }
 
@@ -154,7 +166,7 @@ impl Daemon {
         };
 
         // If the hook is set call it with the parent pid
-        if let Some(hook) = self.pre_fork_hook {
+        if let Some(hook) = self.before_fork_hook {
             hook(parent_pid.as_raw());
         }
 
@@ -165,7 +177,7 @@ impl Daemon {
         unsafe {
             match fork() {
                 Ok(ForkResult::Parent { child: cpid }) => {
-                    if let Some(hook) = self.post_fork_parent_hook {
+                    if let Some(hook) = self.after_fork_parent_hook {
                         hook(parent_pid.as_raw(), cpid.as_raw());
                     } else {
                         exit(0)
@@ -175,7 +187,7 @@ impl Daemon {
                     // Set up stream redirection as early as possible
                     redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
                     pid = getpid();
-                    if let Some(hook) = self.post_fork_child_hook {
+                    if let Some(hook) = self.after_fork_child_hook {
                         hook(parent_pid.as_raw(), pid.as_raw());
                     }
                     ()
@@ -273,9 +285,13 @@ impl Daemon {
             Ok(_) => (),
             Err(_) => return Err(DaemonError::ChDir),
         };
-        // Now this process should be a daemon, return
-        Ok(())
+
+        if let Some(hook) = &self.after_init_hook {
+            hook(self.after_init_hook_data);
+            Ok(())
+        } else {
+            // Now this process should be a daemon, return
+            Ok(())
+        }
     }
 }
-
-
