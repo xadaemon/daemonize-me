@@ -34,22 +34,28 @@ use crate::user::User;
 /// * stderr [optional][**recommended**], same as above but for standard error
 /// * chdir [optional], default is "/"
 /// * name [optional], set the daemon process name eg what shows in `ps` default is to not set a process name
+/// * pre_fork_hook [optional], called before the fork with the current pid as argument
+/// * post_fork_parent_hook [optional], called after the fork with the parent pid as argument, can be used to continue some work on the parent after the fork (do not return)
+/// * post_fork_child_hook [optional], called after the fork with the parent and child pid as arguments
 ///
 /// * See the setter function documentation for more details
 ///
 /// **Beware there is no escalation back if dropping privileges**
 pub struct Daemon {
-    pub chdir: PathBuf,
-    pub pid_file: Option<PathBuf>,
-    pub chown_pid_file: bool,
-    pub user: Option<User>,
-    pub group: Option<Group>,
-    pub umask: u16,
-    pub stdin: Stdio,
+    chdir: PathBuf,
+    pid_file: Option<PathBuf>,
+    chown_pid_file: bool,
+    user: Option<User>,
+    group: Option<Group>,
+    umask: u16,
     // stdin is practically always null
-    pub stdout: Stdio,
-    pub stderr: Stdio,
-    pub name: Option<OsString>,
+    stdin: Stdio,
+    stdout: Stdio,
+    stderr: Stdio,
+    name: Option<OsString>,
+    pre_fork_hook: Option<fn(pid: i32)>,
+    post_fork_parent_hook: Option<fn(parent_pid: i32,  child_pid: i32) -> !>,
+    post_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
 }
 
 impl Daemon {
@@ -65,6 +71,9 @@ impl Daemon {
             stdout: Stdio::devnull(),
             stderr: Stdio::devnull(),
             name: None,
+            pre_fork_hook: None,
+            post_fork_parent_hook: None,
+            post_fork_child_hook: None,
         }
     }
 
@@ -118,17 +127,57 @@ impl Daemon {
         self
     }
 
+    pub fn setup_hooks(mut self, pre_fork_hook: Option<fn(pid: i32)>,
+                       post_fork_parent_hook: Option<fn(parent_pid: i32,  child_pid: i32) -> !>,
+                       post_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32)-> ()>) -> Self {
+        self.pre_fork_hook = pre_fork_hook;
+        self.post_fork_parent_hook = post_fork_parent_hook;
+        self.post_fork_child_hook = post_fork_child_hook;
+        self
+    }
+
     /// Using the parameters set, daemonize the process
     pub fn start(self) -> Result<()> {
-        let pid: Pid;
+        let mut pid: Pid;
+        let parent_pid = getpid();
         // resolve options to concrete values to please the borrow checker
         let has_pid_file = self.pid_file.is_some();
         let pid_file_path = match self.pid_file {
             Some(path) => path.clone(),
             None => Path::new("").to_path_buf(),
         };
-        // Set up stream redirection as early as possible
-        redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+
+        // If the hook is set call it with the parent pid
+        if let Some(hook) = self.pre_fork_hook {
+            hook(parent_pid.as_raw());
+        }
+
+        // Fork and if the process is the parent exit gracefully
+        // if the  process is the child just continue execution
+        // this was made unsafe by the nix upstream in between versions
+        // thus the unsafe block is required here
+        unsafe {
+            match fork() {
+                Ok(ForkResult::Parent { child: cpid }) => {
+                    if let Some(hook) = self.post_fork_parent_hook {
+                        hook(parent_pid.as_raw(), cpid.as_raw());
+                    } else {
+                        exit(0)
+                    }
+                }
+                Ok(ForkResult::Child) => {
+                    // Set up stream redirection as early as possible
+                    redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+                    pid = getpid();
+                    if let Some(hook) = self.post_fork_child_hook {
+                        hook(parent_pid.as_raw(), pid.as_raw());
+                    }
+                    ()
+                },
+                Err(_) => return Err(DaemonError::Fork),
+            }
+        }
+
         if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
             return Err(DaemonError::InvalidUserGroupPair);
         } else if (self.user.is_some() || self.group.is_some())
@@ -136,17 +185,7 @@ impl Daemon {
         {
             return Err(DaemonError::InvalidUserGroupPair);
         }
-        // Fork and if the process is the parent exit gracefully
-        // if the  process is the child just continue execution
-        // this was made unsafe by the nix upstream in between versions
-        // thus the unsafe block is required here
-        unsafe {
-            match fork() {
-                Ok(ForkResult::Parent { child: _ }) => exit(0),
-                Ok(ForkResult::Child) => (),
-                Err(_) => return Err(DaemonError::Fork),
-            }
-        }
+
         if let Some(proc_name) = &self.name {
             match set_proc_name(proc_name.as_ref()) {
                 Ok(()) => (),

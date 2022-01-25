@@ -9,9 +9,6 @@ use daemonize_me::user::User;
 fn main() {
     let stdout = File::create("info.log").unwrap();
     let stderr = File::create("err.log").unwrap();
-    let uid = getuid();
-    let gid = getgid();
-    println!("sid: {}, pid: {}", uid, gid);
     let daemon = Daemon::new()
         .pid_file("example.pid", Some(false))
         .user(User::try_from("daemon").unwrap())
