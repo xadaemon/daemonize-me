@@ -1,40 +1,26 @@
 # daemonize-me [![Rust](https://github.com/CardinalBytes/daemonize-me/workflows/Rust/badge.svg)](https://github.com/CardinalBytes/daemonize-me/actions) [![Crates.io](https://img.shields.io/crates/v/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/d/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/l/daemonize-me)](https://github.com/CardinalBytes/daemonize-me/blob/master/LICENSE)
 Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
 
+# 2.0 development track
+I thank you for your interest in the development track , but beware it comes with caveats
+like any development track bugs are expected and breaking changes are allowed happen.
+
+**DO NOT USE IN PRODUCTION, USE 1.0.0 FOR ANYTHING SERIOUS**
+
+# 2.0 timeline:
+This is an expected timeline for release of the 2.0 track, all months are 2022
+* jan - feb: development work and stabilization
+* mar: freeze and release towards the end of the month
+
 # Basic usage
 Add it to your cargo.toml this will add the whole 1.0.x series as compatible as per semver
 ```
-daemonize-me = "1.0"
+daemonize-me = "{check the version}"
 ```
-Example:
-```rust
-extern crate daemonize_me;
-use daemonize_me::{Daemon, Group, User};
-use std::convert::TryFrom;
-use std::fs::File;
 
-fn main() {
-    let stdout = File::create("info.log").unwrap();
-    let stderr = File::create("err.log").unwrap();
-    let daemon = Daemon::new()
-        .pid_file("example.pid", Some(false))
-        .user(User::try_from("daemon").unwrap())
-        .group(Group::try_from("daemon").unwrap())
-        .umask(0o000)
-        .work_dir(".")
-        .stdout(stdout)
-        .stderr(stderr)
-        .start();
-
-    match daemon {
-        Ok(_) => println!("Daemonized with success"),
-        Err(e) => eprintln!("Error, {}", e),
-    }
-}
-```
 
 ## OS support
-I will try to keep support for linux, freebsd and macos
+Support is given for linux, freebsd and macos
 
 | os | tier |
 | --- | --- |
@@ -47,11 +33,11 @@ For tier 1 any code that breaks the tests and or ci/cd is blocking for a release
 tier 2 compilation errors are release blocking, tier 3 are supported on a best effort basis,
 and build failure as well as test failures are not blocking.
 
-note on custom/hobby OS support, if your os implements the syscalls used in lib.rs with behavior that is equivalent then this library is likely to work but it's even less of a guarantee.
+Note on custom/hobby OS support: if your os implements the syscalls used in lib.rs with behavior that is equivalent then this library is likely to work but it's even less of a guarantee.
 
 ## Supported Versions
 
-Odd numbered minor versions receive patches and fixes only until the next odd numbered release, even numbered releases are considered LTS and will get fixes until the next even release happens - about 6 months.
+In the development track every version is unsupported and won't receive backport fixes.
 
 # License
 
