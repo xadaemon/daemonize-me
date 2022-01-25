@@ -1,8 +1,10 @@
 extern crate daemonize_me;
-use daemonize_me::{Daemon, Group, User};
+pub use daemonize_me::daemon::Daemon;
 use nix::unistd::{getgid, getuid};
 use std::convert::TryFrom;
 use std::fs::File;
+use daemonize_me::group::Group;
+use daemonize_me::user::User;
 
 fn main() {
     let stdout = File::create("info.log").unwrap();
@@ -23,5 +25,9 @@ fn main() {
     match daemon {
         Ok(_) => println!("Daemonized with success"),
         Err(e) => eprintln!("Error, {}", e),
+    }
+
+    for i in 0..=10000 {
+        println!("{}", i);
     }
 }

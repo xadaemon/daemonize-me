@@ -1,8 +1,10 @@
 extern crate daemonize_me;
-use daemonize_me::{Daemon, Group, User};
+pub use daemonize_me::daemon::Daemon;
 use nix::unistd::{getgid, getuid};
 use std::convert::TryFrom;
 use std::fs::File;
+use daemonize_me::group::Group;
+use daemonize_me::user::User;
 
 fn main() {
     let stdout = File::create("info.log").unwrap();
@@ -24,7 +26,8 @@ fn main() {
         Ok(_) => println!("Daemonized with success"),
         Err(e) => eprintln!("Error, {}", e),
     }
-    // use infinite loop to keep process open for inspection
-    println!("Hello from the daemon");
-    loop {}
+
+    loop {
+        // You wil have to kill this process yourself
+    }
 }

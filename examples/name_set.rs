@@ -1,9 +1,10 @@
 extern crate daemonize_me;
-use daemonize_me::{Daemon, Group, User};
+pub use daemonize_me::daemon::Daemon;
 use nix::unistd::{getgid, getuid};
 use std::convert::TryFrom;
 use std::fs::File;
-use std::ffi::{OsStr, OsString};
+use daemonize_me::group::Group;
+use daemonize_me::user::User;
 
 fn main() {
     let stdout = File::create("info.log").unwrap();
@@ -13,20 +14,21 @@ fn main() {
     println!("sid: {}, pid: {}", uid, gid);
     let daemon = Daemon::new()
         .pid_file("example.pid", Some(false))
-        .user(User::try_from("mxavier").unwrap())
+        .user(User::try_from("daemon").unwrap())
         .group(Group::try_from("daemon").unwrap())
         .umask(0o000)
         .work_dir(".")
         .stdout(stdout)
         .stderr(stderr)
-        .name(&*OsString::from(String::from("test_daemon")).as_ref())
+        .name("Daemonize me test renamed daemon".as_ref())
         .start();
 
     match daemon {
         Ok(_) => println!("Daemonized with success"),
         Err(e) => eprintln!("Error, {}", e),
     }
-    // use infinite loop to keep process open for inspection
-    println!("Hello from the daemon");
-    loop {}
+
+    loop {
+        // You wil have to kill this process yourself
+    }
 }
