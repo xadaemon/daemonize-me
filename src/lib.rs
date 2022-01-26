@@ -20,7 +20,7 @@ pub mod daemon;
 
 #[derive(Debug, Snafu)]
 pub enum DaemonError {
-    /// This feature is unavailable or not implemented to your target os
+    /// This feature is unavailable, or not implemented for your target os
     UnsupportedOnOS,
     /// Unable to fork
     Fork,
@@ -74,7 +74,9 @@ mod tests {
     // TODO: Improve testing coverage
     extern crate nix;
 
-    use super::*;
+    use std::convert::TryFrom;
+    use crate::daemon::Daemon;
+    use crate::user::User;
 
     #[test]
     fn test_uname_to_uid_resolution() {

@@ -43,22 +43,22 @@ use crate::user::User;
 ///
 /// **Beware there is no escalation back if dropping privileges**
 pub struct Daemon<'a> {
-    chdir: PathBuf,
-    pid_file: Option<PathBuf>,
-    chown_pid_file: bool,
-    user: Option<User>,
-    group: Option<Group>,
-    umask: u16,
+    pub(crate) chdir: PathBuf,
+    pub(crate) pid_file: Option<PathBuf>,
+    pub(crate) chown_pid_file: bool,
+    pub(crate) user: Option<User>,
+    pub(crate) group: Option<Group>,
+    pub(crate) umask: u16,
     // stdin is practically always null
-    stdin: Stdio,
-    stdout: Stdio,
-    stderr: Stdio,
-    name: Option<OsString>,
-    before_fork_hook: Option<fn(pid: i32)>,
-    after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
-    after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
-    after_init_hook_data: Option<&'a dyn Any>,
-    after_init_hook: Option<Box<fn(Option<&'a dyn Any>)>>,
+    pub(crate) stdin: Stdio,
+    pub(crate) stdout: Stdio,
+    pub(crate) stderr: Stdio,
+    pub(crate) name: Option<OsString>,
+    pub(crate) before_fork_hook: Option<fn(pid: i32)>,
+    pub(crate) after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
+    pub(crate) after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
+    pub(crate) after_init_hook_data: Option<&'a dyn Any>,
+    pub(crate) after_init_hook: Option<fn(Option<&'a dyn Any>)>,
 }
 
 impl<'a> Daemon<'a> {
@@ -149,7 +149,7 @@ impl<'a> Daemon<'a> {
 
     pub fn setup_post_init_hook(mut self, post_fork_child_hook: fn(ctx: Option<&'a dyn Any>),
                                 data: Option<&'a dyn Any>) -> Self {
-        self.after_init_hook = Some(Box::new(post_fork_child_hook));
+        self.after_init_hook = Some(post_fork_child_hook);
         self.after_init_hook_data = data;
         self
     }
@@ -278,7 +278,7 @@ impl<'a> Daemon<'a> {
                 Ok(_) => (),
                 Err(_) => return Err(DaemonError::SetUid),
             }
-        }
+        };
         // chdir
         let chdir_path = self.chdir.to_owned();
         match chdir::<Path>(chdir_path.as_ref()) {
@@ -286,11 +286,11 @@ impl<'a> Daemon<'a> {
             Err(_) => return Err(DaemonError::ChDir),
         };
 
-        if let Some(hook) = &self.after_init_hook {
+        // Now this process should be a daemon, we run the hook and return or just return
+        if let Some(hook) = self.after_init_hook {
             hook(self.after_init_hook_data);
             Ok(())
         } else {
-            // Now this process should be a daemon, return
             Ok(())
         }
     }
