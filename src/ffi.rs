@@ -3,9 +3,11 @@ extern crate libc;
 
 use crate::{DaemonError, Result};
 use std::ffi::{CStr, CString, OsStr, OsString};
-use libc::{prctl, PR_SET_NAME};
 #[cfg(target_os = "linux")]
-use crate::DaemonError::{GetPasswdRecord, SetProcName};
+use {
+    crate::DaemonError::{GetPasswdRecord, SetProcName},
+    libc::{prctl, PR_SET_NAME}
+};
 #[cfg(not(target_os = "linux"))]
 use crate::DaemonError::{GetPasswdRecord, SetProcName, UnsupportedOnOS};
 use std::os::unix::ffi::OsStrExt;
@@ -20,6 +22,8 @@ struct group {
     gr_mem: *const *const libc::c_char,
 }
 
+// For linux the passwd entries are simplified
+#[cfg(target_os = "linux")]
 #[repr(C)]
 #[allow(dead_code)]
 struct passwd {
@@ -30,6 +34,24 @@ struct passwd {
     pw_gecos: *const libc::c_char,
     pw_dir: *const libc::c_char,
     pw_shell: *const libc::c_char,
+}
+
+// Used on BSD family targets
+#[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
+#[repr(C)]
+#[allow(dead_code)]
+struct passwd {
+    pw_name: *const libc::c_char,
+    pw_passwd: *const libc::c_char,
+    pw_uid: libc::uid_t,
+    pw_gid: libc::gid_t,
+    pw_change: libc::time_t,
+    pw_class: *const libc::c_char,
+    pw_gecos: *const libc::c_char,
+    pw_dir: *const libc::c_char,
+    pw_shell: *const libc::c_char,
+    pw_expire: libc::time_t,
+    pw_fields: libc::c_int,
 }
 
 #[allow(dead_code)]

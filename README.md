@@ -1,8 +1,11 @@
 # daemonize-me [![Rust](https://github.com/CardinalBytes/daemonize-me/workflows/Rust/badge.svg)](https://github.com/CardinalBytes/daemonize-me/actions) [![Crates.io](https://img.shields.io/crates/v/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/d/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/l/daemonize-me)](https://github.com/CardinalBytes/daemonize-me/blob/master/LICENSE)
 Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
 
+# Current release
+1.0-LTS track: 1.0.1
+
 # Basic usage
-Add it to your cargo.toml this will add the whole 1.0.x series as compatible as per semver
+Add it to your cargo.toml this will add the whole 1.0.x (LTS) series as compatible as per semver
 ```
 daemonize-me = "1.0"
 ```
