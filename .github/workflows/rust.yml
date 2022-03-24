@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: [ trunk ]
+    branches: [ trunk, 'dev/**', 'lts/**' ]
   pull_request:
     branches: [ trunk, 'dev/**', 'lts/**' ]
 
