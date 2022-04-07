@@ -2,7 +2,7 @@
 Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
 
 # Current release
-1.0-LTS track: 1.0.1
+1.0-LTS track: 1.0.2
 
 # Basic usage
 Add it to your cargo.toml this will add the whole 1.0.x (LTS) series as compatible as per semver
