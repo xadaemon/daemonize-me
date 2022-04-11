@@ -4,7 +4,7 @@ Rust library to ease the task of creating daemons, I have drawn heavy inspiratio
 # Current releases and EOL table
 | track    | version | EOL     |
 |----------|---------|---------|
-| 2.0      | 2.0.0   | TBA     |
+| 2.0      | 2.0.1   | TBA     |
 | 1.0(LTS) | 1.0.2   | 2022-10 |
 
 
