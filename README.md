@@ -53,8 +53,12 @@ and build failure as well as test failures are not blocking.
 note on custom/hobby OS support, if your os implements the syscalls used in lib.rs with behavior that is equivalent then this library is likely to work but it's even less of a guarantee.
 
 ## Supported Versions
+LTS versions are marked as such in the current release, those have a lifetime of 6 months after the release of the next version.
 
-Odd numbered minor versions receive patches and fixes only until the next odd numbered release, even numbered releases are considered LTS and will get fixes until the next even release happens - about 6 months.
+Non LTS versions will only be supported until the next version:
+
+i.e: 1.0.x is an LTS version, when 2.0.0 lands it will be supported for 6 more months.
+within releases patches are **NOT LTS**.
 
 # License
 
