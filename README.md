@@ -7,8 +7,6 @@ Rust library to ease the task of creating daemons, I have drawn heavy inspiratio
 | 2.0      | 2.0.0   | TBA     |
 | 1.0(LTS) | 1.0.2   | 2022-10 |
 
-# Semver public API
-The public API of this crate is considered 
 
 # Basic usage
 Add it to your cargo.toml this will add the whole 2.0.x series as compatible as per semver
