@@ -12,11 +12,17 @@ extern crate nix;
 
 use thiserror::Error;
 
-pub mod ffi;
-pub mod user;
-pub mod group;
-pub mod stdio;
-pub mod daemon;
+mod stdio;
+
+mod group;
+mod user;
+mod daemon;
+mod ffi;
+
+pub use crate::group::Group;
+pub use crate::user::User;
+pub use crate::daemon::Daemon;
+
 
 #[derive(Error, Debug)]
 pub enum DaemonError {

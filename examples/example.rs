@@ -1,12 +1,11 @@
 extern crate daemonize_me;
 
 use std::any::Any;
-use std::convert::TryFrom;
 use std::fs::File;
 use std::process::exit;
 
-pub use daemonize_me::daemon::Daemon;
-use daemonize_me::user::User;
+pub use daemonize_me::Daemon;
+
 
 fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
     println!("Parent pid: {}, Child pid {}", ppid, cpid);
@@ -36,9 +35,11 @@ fn main() {
         .work_dir(".")
         .stdout(stdout)
         .stderr(stderr)
+        // Hooks are optional
         .setup_post_fork_parent_hook(post_fork_parent)
         .setup_post_fork_child_hook(post_fork_child)
         .setup_post_init_hook(after_init, None)
+        //
         .start();
 
     match daemon {

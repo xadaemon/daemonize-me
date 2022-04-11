@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+pub use std::convert::TryFrom;
 
 use crate::{DaemonError, Result};
 use crate::ffi::GroupRecord;
