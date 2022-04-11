@@ -36,7 +36,7 @@ struct passwd {
     pw_shell: *const libc::c_char,
 }
 
-// Used on BSD family targets
+// Used on MacOS and FreeBSD
 #[cfg(any(target_os = "macos", target_os = "freebsd"))]
 #[repr(C)]
 #[allow(dead_code)]
@@ -54,7 +54,7 @@ struct passwd {
     pw_fields: libc::c_int,
 }
 
-// Used on BSD family targets
+// Used on the other two supported BSDs
 #[cfg(any(target_os = "openbsd", target_os = "netbsd"))]
 #[repr(C)]
 #[allow(dead_code)]
