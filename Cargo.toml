@@ -1,8 +1,8 @@
 [package]
 name = "daemonize-me"
 version = "2.0.0"
-authors = ["Matheus Xavier <m.xavier@ieee.org>"]
-edition = "2018"
+authors = ["Matheus Xavier <xavier+cargo@2dc.io>"]
+edition = "2021"
 license = "BSD-3-Clause/Apache-2.0"
 repository = "https://github.com/CardinalBytes/daemonize-me"
 description = "Rust library to ease the task of creating daemons on unix-like systems"
@@ -15,4 +15,4 @@ categories = ["os::unix-apis"]
 [dependencies]
 libc = "0.2.113"
 nix = "0.23.1"
-snafu = "0.7.0"
+thiserror = "1.0"

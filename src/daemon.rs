@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::convert::TryFrom;
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
 use std::io::prelude::*;
@@ -17,6 +18,7 @@ use nix::unistd::{
 };
 
 use crate::{DaemonError, Result};
+use crate::DaemonError::{InvalidGroup, InvalidUser};
 use crate::ffi::{PasswdRecord, set_proc_name};
 use crate::group::Group;
 use crate::stdio::{redirect_stdio, Stdio};
@@ -91,20 +93,32 @@ impl<'a> Daemon<'a> {
         self.chown_pid_file = chmod.unwrap_or(false);
         self
     }
+
     /// As the last step the code will change the working directory to this one defaults to `/`
     pub fn work_dir<T: AsRef<Path>>(mut self, path: T) -> Self {
         self.chdir = path.as_ref().to_owned();
         self
     }
+
     /// The code will attempt to drop privileges with `setuid` to the provided user
     pub fn user<T: Into<User>>(mut self, user: T) -> Self {
         self.user = Some(user.into());
         self
     }
+
     /// The code will attempt to drop privileges with `setgid` to the provided group, you mut provide a group if you provide an user
     pub fn group<T: Into<Group>>(mut self, group: T) -> Self {
         self.group = Some(group.into());
         self
+    }
+
+    pub fn group_copy_user(mut self) -> Result<Self> {
+        if let Some(user) = &self.user {
+            self.group = Some(Group::try_from(&user.name)?);
+            Ok(self)
+        } else {
+            Err(InvalidUser)
+        }
     }
 
     pub fn umask(mut self, mask: u16) -> Self {
@@ -239,17 +253,19 @@ impl<'a> Daemon<'a> {
         }
         // Drop privileges and chown the requested files
         if self.user.is_some() && self.group.is_some() {
-            let user = match self.user.unwrap() {
-                User::Id(id) => Uid::from_raw(id),
+            let user = match self.user {
+                Some(user) => Uid::from_raw(user.id),
+                None => return Err(InvalidUser),
             };
 
-            let uname = match PasswdRecord::get_record_by_id(user.as_raw()) {
+            let uname = match PasswdRecord::lookup_record_by_id(user.as_raw()) {
                 Ok(record) => record.pw_name,
                 Err(_) => return Err(DaemonError::InvalidUser),
             };
 
-            let gr = match self.group.unwrap() {
-                Group::Id(id) => Gid::from_raw(id),
+            let gr = match self.group {
+                Some(grp) => Gid::from_raw(grp.id),
+                None => return Err(InvalidGroup),
             };
 
             if self.chown_pid_file && has_pid_file {

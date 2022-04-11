@@ -10,7 +10,7 @@
 extern crate libc;
 extern crate nix;
 
-use snafu::Snafu;
+use thiserror::Error;
 
 pub mod ffi;
 pub mod user;
@@ -18,73 +18,52 @@ pub mod group;
 pub mod stdio;
 pub mod daemon;
 
-#[derive(Debug, Snafu)]
+#[derive(Error, Debug)]
 pub enum DaemonError {
-    /// This feature is unavailable, or not implemented for your target os
+    #[error("This feature is unavailable, or not implemented for your target os")]
     UnsupportedOnOS,
-    /// Unable to fork
+    #[error("Unable to fork")]
     Fork,
-    /// Failed to chdir
+    #[error("Failed to chdir")]
     ChDir,
-    /// Failed to open dev null
+    #[error("Failed to open dev null")]
     OpenDevNull,
-    /// Failed to close the file pointer of a stdio stream
+    #[error("Failed to close the file pointer of a stdio stream")]
     CloseFp,
-    /// Invalid or nonexistent user
+    #[error("Invalid or nonexistent user")]
     InvalidUser,
-    /// Invalid or nonexistent group
+    #[error("Invalid or nonexistent group")]
     InvalidGroup,
-    /// Either group or user was specified but no the other
+    #[error("Either group or user was specified but not the other")]
     InvalidUserGroupPair,
-    /// The specified cstr is invalid
+    #[error("The specified cstr is invalid")]
     InvalidCstr,
-    /// Failed to execute initgroups
+    #[error("Failed to execute initgroups")]
     InitGroups,
-    /// Failed to set uid
+    #[error("Failed to set uid")]
     SetUid,
-    /// Failed to set gid
+    #[error("Failed to set gid")]
     SetGid,
-    /// Failed to chown the pid file
+    #[error("Failed to chown the pid file")]
     ChownPid,
-    /// Failed to create the pid file
+    #[error("Failed to create the pid file")]
     OpenPid,
-    /// Failed to write to the pid file
+    #[error("Failed to write to the pid file")]
     WritePid,
-    /// Failed to redirect the standard streams
+    #[error("Failed to redirect the standard streams")]
     RedirectStream,
-    /// Umask bits are invalid
+    #[error("Umask bits are invalid")]
     InvalidUmaskBits,
-    /// Failed to set sid
+    #[error("Failed to set sid")]
     SetSid,
-    /// Failed to get groups record
+    #[error("Failed to get groups record")]
     GetGrRecord,
-    /// Failed to get passwd record
+    #[error("Failed to get passwd record")]
     GetPasswdRecord,
-    /// Failed to set proc name
+    #[error("Failed to set proc name")]
     SetProcName,
+    #[error("Failed to set proc name")]
     InvalidProcName,
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
-
-#[cfg(test)]
-mod tests {
-    // TODO: Improve testing coverage
-    extern crate nix;
-
-    use std::convert::TryFrom;
-    use crate::daemon::Daemon;
-    use crate::user::User;
-
-    #[test]
-    fn test_uname_to_uid_resolution() {
-        let daemon = Daemon::new().user(User::try_from("root").unwrap());
-        assert!(daemon.user.is_some());
-        let uid = match daemon.user.unwrap() {
-            User::Id(id) => id,
-        };
-        assert_eq!(uid, 0)
-    }
-}
