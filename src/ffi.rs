@@ -1,22 +1,24 @@
 #![deny(warnings)]
+#![allow(unsafe_code)]
 extern crate libc;
 
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 
-use crate::{DaemonError, Result};
 #[cfg(target_os = "linux")]
 use {
     crate::DaemonError::{GetPasswdRecord, SetProcName},
     libc::{PR_SET_NAME, prctl},
 };
+
+use crate::{DaemonError, Result};
 #[cfg(not(target_os = "linux"))]
 use crate::DaemonError::{GetPasswdRecord, SetProcName, UnsupportedOnOS};
 use crate::DaemonError::InvalidProcName;
 
 #[repr(C)]
 #[allow(dead_code)]
-struct group {
+struct FFIGroup {
     gr_name: *const libc::c_char,
     gr_passwd: *const libc::c_char,
     gr_gid: libc::gid_t,
@@ -26,7 +28,7 @@ struct group {
 #[cfg(target_os = "linux")]
 #[repr(C)]
 #[allow(dead_code)]
-struct passwd {
+struct FFIPasswd {
     pw_name: *const libc::c_char,
     pw_passwd: *const libc::c_char,
     pw_uid: libc::uid_t,
@@ -40,7 +42,7 @@ struct passwd {
 #[cfg(any(target_os = "macos", target_os = "freebsd"))]
 #[repr(C)]
 #[allow(dead_code)]
-struct passwd {
+struct FFIPasswd {
     pw_name: *const libc::c_char,
     pw_passwd: *const libc::c_char,
     pw_uid: libc::uid_t,
@@ -58,7 +60,7 @@ struct passwd {
 #[cfg(any(target_os = "openbsd", target_os = "netbsd"))]
 #[repr(C)]
 #[allow(dead_code)]
-struct passwd {
+struct FFIPasswd {
     pw_name: *const libc::c_char,
     pw_passwd: *const libc::c_char,
     pw_uid: libc::uid_t,
@@ -73,10 +75,10 @@ struct passwd {
 
 #[allow(dead_code)]
 extern "C" {
-    fn getgrnam(name: *const libc::c_char) -> *const group;
-    fn getgrgid(name: libc::gid_t) -> *const group;
-    fn getpwnam(name: *const libc::c_char) -> *const passwd;
-    fn getpwuid(name: libc::uid_t) -> *const passwd;
+    fn getgrnam(name: *const libc::c_char) -> *const FFIGroup;
+    fn getgrgid(name: libc::gid_t) -> *const FFIGroup;
+    fn getpwnam(name: *const libc::c_char) -> *const FFIPasswd;
+    fn getpwuid(name: libc::uid_t) -> *const FFIPasswd;
 }
 
 #[derive(Debug)]
@@ -99,51 +101,64 @@ pub struct PasswdRecord {
     pub pw_shell: String,
 }
 
+unsafe fn check_group_record(grp: *const FFIGroup) -> Result<GroupRecord> {
+    return if grp.is_null() {
+        Err(DaemonError::GetGrRecord)
+    } else {
+        let gr = &*grp;
+        let sgr = GroupRecord {
+            gr_name: CStr::from_ptr(gr.gr_name).to_string_lossy().to_string(),
+            gr_passwd: CStr::from_ptr(gr.gr_passwd).to_string_lossy().to_string(),
+            gr_gid: gr.gr_gid as u32,
+        };
+        Ok(sgr)
+    };
+}
+
+unsafe fn check_passwd_record(passwd: *const FFIPasswd) -> Result<PasswdRecord> {
+    return if passwd.is_null() {
+        Err(GetPasswdRecord)
+    } else {
+        let pw = &*passwd;
+        let pwr = PasswdRecord {
+            pw_name: CStr::from_ptr(pw.pw_name).to_string_lossy().to_string(),
+            pw_passwd: CStr::from_ptr(pw.pw_passwd).to_string_lossy().to_string(),
+            pw_uid: pw.pw_uid as u32,
+            pw_gid: pw.pw_gid as u32,
+            pw_gecos: CStr::from_ptr(pw.pw_gecos).to_string_lossy().to_string(),
+            pw_dir: CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string(),
+            pw_shell: CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string(),
+        };
+        Ok(pwr)
+    };
+}
+
 #[allow(dead_code)]
 impl GroupRecord {
-    pub fn get_record_by_name(name: &str) -> Result<GroupRecord> {
+    pub fn lookup_record_by_name(name: &str) -> Result<GroupRecord> {
         let record_name = match CString::new(name) {
             Ok(s) => s,
             Err(_) => return Err(DaemonError::InvalidCstr),
         };
 
         unsafe {
-            let raw_passwd = getgrnam(record_name.as_ptr());
-            return if raw_passwd.is_null() {
-                Err(DaemonError::GetGrRecord)
-            } else {
-                let gr = &*raw_passwd;
-                let sgr = GroupRecord {
-                    gr_name: CStr::from_ptr(gr.gr_name).to_string_lossy().to_string(),
-                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_string_lossy().to_string(),
-                    gr_gid: gr.gr_gid as u32,
-                };
-                Ok(sgr)
-            };
+            let raw_grp = getgrnam(record_name.as_ptr());
+            return check_group_record(raw_grp);
         };
     }
-    pub fn get_record_by_id(gid: u32) -> Result<GroupRecord> {
+
+    pub fn lookup_record_by_id(gid: u32) -> Result<GroupRecord> {
         let record_id = gid as libc::uid_t;
 
         unsafe {
-            let raw_passwd = getgrgid(record_id);
-            return if raw_passwd.is_null() {
-                Err(DaemonError::GetGrRecord)
-            } else {
-                let gr = &*raw_passwd;
-                let sgr = GroupRecord {
-                    gr_name: CStr::from_ptr(gr.gr_name).to_string_lossy().to_string(),
-                    gr_passwd: CStr::from_ptr(gr.gr_passwd).to_string_lossy().to_string(),
-                    gr_gid: gr.gr_gid as u32,
-                };
-                Ok(sgr)
-            };
+            let raw_grp = getgrgid(record_id);
+            return check_group_record(raw_grp);
         };
     }
 }
 
 impl PasswdRecord {
-    pub fn get_record_by_name(name: &str) -> Result<PasswdRecord> {
+    pub fn lookup_record_by_name(name: &str) -> Result<PasswdRecord> {
         let record_name = match CString::new(name) {
             Ok(s) => s,
             Err(_) => return Err(DaemonError::InvalidCstr),
@@ -151,43 +166,16 @@ impl PasswdRecord {
 
         unsafe {
             let raw_passwd = getpwnam(record_name.as_ptr());
-            return if raw_passwd.is_null() {
-                Err(GetPasswdRecord)
-            } else {
-                let pw = &*raw_passwd;
-                let pwr = PasswdRecord {
-                    pw_name: CStr::from_ptr(pw.pw_name).to_string_lossy().to_string(),
-                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_string_lossy().to_string(),
-                    pw_uid: pw.pw_uid as u32,
-                    pw_gid: pw.pw_gid as u32,
-                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_string_lossy().to_string(),
-                    pw_dir: CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string(),
-                    pw_shell: CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string(),
-                };
-                Ok(pwr)
-            };
+            return check_passwd_record(raw_passwd);
         };
     }
-    pub fn get_record_by_id(uid: u32) -> Result<PasswdRecord> {
+
+    pub fn lookup_record_by_id(uid: u32) -> Result<PasswdRecord> {
         let record_id = uid as libc::uid_t;
 
         unsafe {
             let raw_passwd = getpwuid(record_id);
-            return if raw_passwd.is_null() {
-                Err(DaemonError::GetPasswdRecord)
-            } else {
-                let pw = &*raw_passwd;
-                let pwr = PasswdRecord {
-                    pw_name: CStr::from_ptr(pw.pw_name).to_string_lossy().to_string(),
-                    pw_passwd: CStr::from_ptr(pw.pw_passwd).to_string_lossy().to_string(),
-                    pw_uid: pw.pw_uid as u32,
-                    pw_gid: pw.pw_gid as u32,
-                    pw_gecos: CStr::from_ptr(pw.pw_gecos).to_string_lossy().to_string(),
-                    pw_dir: CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string(),
-                    pw_shell: CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string(),
-                };
-                Ok(pwr)
-            };
+            return check_passwd_record(raw_passwd);
         };
     }
 }
@@ -208,6 +196,7 @@ pub fn set_proc_name(name: &OsStr) -> Result<()> {
     }
 }
 
+// TODO: Implement this for non linux targets
 #[cfg(not(target_os = "linux"))]
 pub fn set_proc_name(name: &OsStr) -> Result<()> {
     Err(UnsupportedOnOS)
@@ -221,28 +210,28 @@ mod tests {
     #[test]
     /// Asserts if the uid returned for the uname "root" is 0
     fn test_passwd_by_name() {
-        let root = PasswdRecord::get_record_by_name("root").unwrap();
+        let root = PasswdRecord::lookup_record_by_name("root").unwrap();
         assert_eq!(root.pw_uid, 0)
     }
 
     #[test]
     /// Asserts if the uname returned by the uid 0 is "root"
     fn test_passwd_by_uid() {
-        let root = PasswdRecord::get_record_by_id(0).unwrap();
+        let root = PasswdRecord::lookup_record_by_id(0).unwrap();
         assert_eq!(root.pw_name, "root")
     }
 
     #[test]
     /// Asserts if the uid returned for the uname "root" is 0
     fn test_gr_by_name() {
-        let root = GroupRecord::get_record_by_name("root").unwrap();
+        let root = GroupRecord::lookup_record_by_name("root").unwrap();
         assert_eq!(root.gr_gid, 0)
     }
 
     #[test]
     /// Asserts if the uname returned by the uid 0 is "root"
     fn test_gr_by_gid() {
-        let root = GroupRecord::get_record_by_id(0).unwrap();
+        let root = GroupRecord::lookup_record_by_id(0).unwrap();
         assert_eq!(root.gr_name, "root")
     }
 }
