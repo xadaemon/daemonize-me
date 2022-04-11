@@ -1,8 +1,9 @@
 extern crate daemonize_me;
-pub use daemonize_me::daemon::Daemon;
-use nix::unistd::{getgid, getuid};
+
 use std::convert::TryFrom;
 use std::fs::File;
+
+pub use daemonize_me::daemon::Daemon;
 use daemonize_me::group::Group;
 use daemonize_me::user::User;
 

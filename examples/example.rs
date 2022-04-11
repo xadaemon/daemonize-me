@@ -1,17 +1,18 @@
 extern crate daemonize_me;
 
 use std::any::Any;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::process::exit;
 
 pub use daemonize_me::daemon::Daemon;
+use daemonize_me::user::User;
 
 fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
     println!("Parent pid: {}, Child pid {}", ppid, cpid);
     println!("Parent will keep running after the child is forked, might even go do other tasks");
-    loop {
-        // keep parent open
-    }
+    println!("Or quit like so, bye :)");
+    exit(0);
 }
 
 fn post_fork_child(ppid: i32, cpid: i32) {
