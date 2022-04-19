@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
 use std::io::prelude::*;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -59,6 +60,7 @@ pub struct Daemon<'a> {
     pub(crate) before_fork_hook: Option<fn(pid: i32)>,
     pub(crate) after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
     pub(crate) after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
+    pub(crate) privileged_hook: Option<Box<dyn Fn(i32, i32) -> ()>>,
     pub(crate) after_init_hook_data: Option<&'a dyn Any>,
     pub(crate) after_init_hook: Option<fn(Option<&'a dyn Any>)>,
 }
@@ -79,6 +81,7 @@ impl<'a> Daemon<'a> {
             before_fork_hook: None,
             after_fork_parent_hook: None,
             after_fork_child_hook: None,
+            privileged_hook: None,
             after_init_hook_data: None,
             after_init_hook: None,
         }
@@ -165,6 +168,11 @@ impl<'a> Daemon<'a> {
                                 data: Option<&'a dyn Any>) -> Self {
         self.after_init_hook = Some(post_fork_child_hook);
         self.after_init_hook_data = data;
+        self
+    }
+
+    pub fn setup_privileged_hook<T, F: Fn(i32, i32) -> () + 'static>(mut self, hook: F) -> Self {
+        self.privileged_hook = Some(Box::new(hook));
         self
     }
 
@@ -275,6 +283,12 @@ impl<'a> Daemon<'a> {
                 };
             }
 
+            // Just before dropping our privileges we run the privileged hook
+            if let Some(privileged_hook) = self.privileged_hook {
+                let hook_fn = privileged_hook.deref();
+                hook_fn(parent_pid.as_raw(), pid.as_raw());
+            }
+
             match setgid(gr) {
                 Ok(_) => (),
                 Err(_) => return Err(DaemonError::SetGid),
@@ -295,6 +309,7 @@ impl<'a> Daemon<'a> {
                 Err(_) => return Err(DaemonError::SetUid),
             }
         };
+
         // chdir
         let chdir_path = self.chdir.to_owned();
         match chdir::<Path>(chdir_path.as_ref()) {
