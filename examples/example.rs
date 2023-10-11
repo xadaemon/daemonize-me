@@ -39,7 +39,7 @@ fn main() {
         .setup_post_fork_parent_hook(post_fork_parent)
         .setup_post_fork_child_hook(post_fork_child)
         .setup_post_init_hook(after_init, None)
-        //
+        // Start the daemon and calls the hooks
         .start();
 
     match daemon {
