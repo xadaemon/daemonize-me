@@ -230,6 +230,7 @@ impl<'a> Daemon<'a> {
             None => return Err(DaemonError::InvalidUmaskBits),
         };
         umask(umask_mode);
+
         // Set the sid so the process isn't session orphan
         if let Err(_) = setsid() {
             return Err(DaemonError::SetSid);
@@ -238,6 +239,7 @@ impl<'a> Daemon<'a> {
             return Err(DaemonError::ChDir);
         };
         pid = getpid();
+
         // create pid file and if configured to, chmod it
         if has_pid_file {
             // chmod of the pid file is deferred to after checking for the presence of the user and group
@@ -251,6 +253,7 @@ impl<'a> Daemon<'a> {
                 Err(_) => return Err(DaemonError::WritePid),
             };
         }
+
         // Drop privileges and chown the requested files
         if self.user.is_some() && self.group.is_some() {
             let user = match self.user {

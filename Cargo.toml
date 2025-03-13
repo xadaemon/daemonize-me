@@ -1,6 +1,6 @@
 [package]
 name = "daemonize-me"
-version = "2.0.1"
+version = "2.0.2"
 authors = ["Matheus Xavier <xavier+cargo@2dc.io>"]
 edition = "2021"
 license = "BSD-3-Clause/Apache-2.0"
