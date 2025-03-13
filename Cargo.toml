@@ -14,5 +14,5 @@ categories = ["os::unix-apis"]
 
 [dependencies]
 libc = "0.2.113"
-nix = "0.23.1"
-thiserror = "1.0"
+nix = {version =  "0.29.0", features = ["process", "user", "fs"]}
+thiserror = "2.0.12"
