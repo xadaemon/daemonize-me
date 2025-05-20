@@ -1,11 +1,8 @@
-extern crate daemonize_me;
-
 use std::any::Any;
 use std::fs::File;
 use std::process::exit;
 
-pub use daemonize_me::Daemon;
-
+use daemonize_me::Daemon;
 
 fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
     println!("Parent pid: {}, Child pid {}", ppid, cpid);
@@ -18,12 +15,12 @@ fn post_fork_child(ppid: i32, cpid: i32) {
     println!("Parent pid: {}, Child pid {}", ppid, cpid);
     println!("This hook is called in the child");
     // Child hook must return
-    return
+    return;
 }
 
 fn after_init(_: Option<&dyn Any>) {
     println!("Initialized the daemon!");
-    return
+    return;
 }
 
 fn main() {
@@ -47,7 +44,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error, {}", e);
             exit(-1);
-        },
+        }
     }
 
     for i in 0..=10000 {

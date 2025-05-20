@@ -1,8 +1,6 @@
-extern crate daemonize_me;
-
 use std::fs::File;
 
-pub use daemonize_me::{Daemon, User, Group};
+use daemonize_me::{Daemon, Group, User};
 
 fn main() {
     let stdout = File::create("info.log").unwrap();
