@@ -16,3 +16,6 @@ categories = ["os::unix-apis"]
 libc = "0.2.113"
 nix = {version =  "0.29.0", features = ["process", "user", "fs"]}
 thiserror = "2.0.12"
+
+[dev-dependencies]
+tokio = { version = "1.45.0", features = ["rt", "rt-multi-thread", "time"] }
