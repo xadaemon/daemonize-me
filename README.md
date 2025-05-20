@@ -2,6 +2,7 @@
 Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
 
 # Current releases and EOL table
+
 | track    | version | EOL     |
 |----------|---------|---------|
 | 2.0      | 2.0.1   | TBA     |
@@ -13,7 +14,7 @@ Add it to your cargo.toml this will add the whole 2.0.x series as compatible as 
 ```toml
 daemonize-me = "2.0"
 ```
-Then look at [example.rs](examples/example.rs)
+Then look at [hooks.rs](examples/hooks.rs)
 
 
 ## OS support
