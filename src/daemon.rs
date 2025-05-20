@@ -6,44 +6,28 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use nix::sys::stat::{Mode, umask};
-#[cfg(not(target_os = "macos"))]
-use nix::unistd::{
-    chdir, chown, fork, ForkResult, getpid, Gid, initgroups, Pid, setgid, setsid,
-    setuid, Uid,
-};
+use nix::sys::stat::{umask, Mode};
 #[cfg(target_os = "macos")]
 use nix::unistd::{
-    chdir, chown, close, dup2, fork, ForkResult, getpid, Gid, Pid, setgid, setsid, setuid, Uid,
+    chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
+};
+#[cfg(not(target_os = "macos"))]
+use nix::unistd::{
+    chdir, chown, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
 
-use crate::{DaemonError, Result};
-use crate::DaemonError::{InvalidGroup, InvalidUser};
-use crate::ffi::{PasswdRecord, set_proc_name};
+use crate::ffi::{set_proc_name, PasswdRecord};
 use crate::group::Group;
 use crate::stdio::{redirect_stdio, Stdio};
 use crate::user::User;
+use crate::DaemonError::{InvalidGroup, InvalidUser};
+use crate::{DaemonError, Result};
 
 /// Basic daemonization consists of:
-/// forking the process, getting a new sid, setting the umask, changing the standard io streams
+/// forking the process, getting a new Session ID (sid), setting the umask, changing the standard io streams
 /// to files and finally dropping privileges.
 ///
-/// Options:
-/// * user [optional], if set will drop privileges to the specified user **NOTE**: This library is strict and makes no assumptions if you provide a user you must provide a group
-/// * group [optional(**see note on user**)], if set will drop privileges to specified group
-/// * umask [optional], umask for the process defaults to 0o027
-/// * pid_file [optional], if set a pid file will be created default is that no file is created *
-/// * stdio [optional][**recommended**], this determines where standard output will be piped to since daemons have no console it's highly recommended to set this
-/// * stderr [optional][**recommended**], same as above but for standard error
-/// * chdir [optional], default is "/"
-/// * name [optional], set the daemon process name eg what shows in `ps` default is to not set a process name
-/// * before_fork_hook [optional], called before the fork with the current pid as argument
-/// * after_fork_parent_hook [optional], called after the fork with the parent pid as argument, can be used to continue some work on the parent after the fork (do not return)
-/// * after_fork_child_hook [optional], called after the fork with the parent and child pid as arguments
-///
-/// * See the setter function documentation for more details
-///
-/// **Beware there is no escalation back if dropping privileges**
+/// **NOTE:** Beware there is no escalation back if dropping privileges
 pub struct Daemon<'a> {
     pub(crate) chdir: PathBuf,
     pub(crate) pid_file: Option<PathBuf>,
@@ -84,7 +68,10 @@ impl<'a> Daemon<'a> {
         }
     }
 
-    /// This is a setter to give your daemon a pid file
+    /// Give your daemon a pid file
+    ///
+    /// By default, no pid file is created.
+    ///
     /// # Arguments
     /// * `path` - path to the file suggested `/var/run/my_program_name.pid`
     /// * `chmod` - if set a chmod of the file to the user and group passed will be attempted (**this being true makes setting an user and group mandatory**)
@@ -101,12 +88,16 @@ impl<'a> Daemon<'a> {
     }
 
     /// The code will attempt to drop privileges with `setuid` to the provided user
+    ///
+    /// **NOTE:** If you provide a user, you must also provide a group.
     pub fn user<T: Into<User>>(mut self, user: T) -> Self {
         self.user = Some(user.into());
         self
     }
 
-    /// The code will attempt to drop privileges with `setgid` to the provided group, you mut provide a group if you provide an user
+    /// The code will attempt to drop privileges with `setgid` to the provided group
+    ///
+    /// **NOTE:** You must provide a group if you provide an user.
     pub fn group<T: Into<Group>>(mut self, group: T) -> Self {
         self.group = Some(group.into());
         self
@@ -121,6 +112,7 @@ impl<'a> Daemon<'a> {
         }
     }
 
+    /// umask for the process, defaults to `0o027`
     pub fn umask(mut self, mask: u16) -> Self {
         self.umask = mask;
         self
@@ -131,38 +123,112 @@ impl<'a> Daemon<'a> {
         self
     }
 
+    /// Determines where standard output will be piped to since daemons have no console attached
+    ///
+    /// It's highly recommended to set this to a file if you want to see output.
     pub fn stdout<T: Into<Stdio>>(mut self, stdio: T) -> Self {
         self.stdout = stdio.into();
         self
     }
 
+    /// Determines where standard error will be piped to since daemons have no console attached
+    ///
+    /// It's highly recommended to set this to a file if you want to see output.
     pub fn stderr<T: Into<Stdio>>(mut self, stdio: T) -> Self {
         self.stderr = stdio.into();
         self
     }
 
+    /// Set the daemon process name
+    ///
+    /// For example, this is what shows up in `ps`.
     pub fn name(mut self, name: &OsStr) -> Self {
         self.name = Some(OsString::from(name));
         self
     }
 
+    /// Hook called before the fork with the current pid as argument
     pub fn setup_pre_fork_hook(mut self, pre_fork_hook: fn(pid: i32)) -> Self {
         self.before_fork_hook = Some(pre_fork_hook);
         self
     }
 
-    pub fn setup_post_fork_parent_hook(mut self, post_fork_parent_hook: fn(parent_pid: i32, child_pid: i32) -> !) -> Self {
+    /// Hook called after the fork with the parent pid as argument
+    ///
+    /// Can be used to continue some work on the parent after the fork.
+    /// **NOTE:** This hook must not return! For instance, you could call `std::process::exit()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use daemonize_me::Daemon;
+    ///
+    /// fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
+    ///     println!("Parent pid: {}, Child pid {}", ppid, cpid);
+    ///     println!("Exiting parent now");
+    ///     std::process::exit(0);
+    /// }
+    ///
+    /// let daemon = Daemon::new()
+    ///     .setup_post_fork_parent_hook(post_fork_parent)
+    ///     .start();
+    /// ```
+    pub fn setup_post_fork_parent_hook(
+        mut self,
+        post_fork_parent_hook: fn(parent_pid: i32, child_pid: i32) -> !,
+    ) -> Self {
         self.after_fork_parent_hook = Some(post_fork_parent_hook);
         self
     }
 
-    pub fn setup_post_fork_child_hook(mut self, post_fork_child_hook: fn(parent_pid: i32, child_pid: i32) -> ()) -> Self {
+    /// Hook called after the fork with the parent and child pid as arguments
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use daemonize_me::Daemon;
+    ///
+    /// fn post_fork_child(ppid: i32, cpid: i32) {
+    ///     println!("Parent pid: {}, Child pid {}", ppid, cpid);
+    ///     println!("This hook is called in the child");
+    ///     // Child hook must return
+    ///     return
+    /// }
+    ///
+    /// let daemon = Daemon::new()
+    ///     .setup_post_fork_child_hook(post_fork_child)
+    ///     .start();
+    /// ```
+    pub fn setup_post_fork_child_hook(
+        mut self,
+        post_fork_child_hook: fn(parent_pid: i32, child_pid: i32) -> (),
+    ) -> Self {
         self.after_fork_child_hook = Some(post_fork_child_hook);
         self
     }
 
-    pub fn setup_post_init_hook(mut self, post_fork_child_hook: fn(ctx: Option<&'a dyn Any>),
-                                data: Option<&'a dyn Any>) -> Self {
+    /// Hook called right before returning control to the caller, that is, right after `start()`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::any::Any;
+    /// # use daemonize_me::Daemon;
+    ///
+    /// fn after_init(_: Option<&dyn Any>) {
+    ///     println!("Initialized the daemon!");
+    ///     return
+    /// }
+    ///
+    /// let daemon = Daemon::new()
+    ///     .setup_post_init_hook(after_init, None)
+    ///     .start();
+    /// ```
+    pub fn setup_post_init_hook(
+        mut self,
+        post_fork_child_hook: fn(ctx: Option<&'a dyn Any>),
+        data: Option<&'a dyn Any>,
+    ) -> Self {
         self.after_init_hook = Some(post_fork_child_hook);
         self.after_init_hook_data = data;
         self
@@ -221,7 +287,7 @@ impl<'a> Daemon<'a> {
         if let Some(proc_name) = &self.name {
             match set_proc_name(proc_name.as_ref()) {
                 Ok(()) => (),
-                Err(e) => return Err(e)
+                Err(e) => return Err(e),
             }
         }
         // Set the umask either to 0o027 (rwxr-x---) or provided value
@@ -283,16 +349,16 @@ impl<'a> Daemon<'a> {
                 Err(_) => return Err(DaemonError::SetGid),
             };
             #[cfg(not(target_os = "macos"))]
-                {
-                    let u_cstr = match CString::new(uname) {
-                        Ok(cstr) => cstr,
-                        Err(_) => return Err(DaemonError::SetGid),
-                    };
-                    match initgroups(&u_cstr, gr) {
-                        Ok(_) => (),
-                        Err(_) => return Err(DaemonError::InitGroups),
-                    };
-                }
+            {
+                let u_cstr = match CString::new(uname) {
+                    Ok(cstr) => cstr,
+                    Err(_) => return Err(DaemonError::SetGid),
+                };
+                match initgroups(&u_cstr, gr) {
+                    Ok(_) => (),
+                    Err(_) => return Err(DaemonError::InitGroups),
+                };
+            }
             match setuid(user) {
                 Ok(_) => (),
                 Err(_) => return Err(DaemonError::SetUid),
