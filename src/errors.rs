@@ -46,6 +46,8 @@ pub enum DaemonError {
     SetProcName,
     #[error("Failed to set proc name")]
     InvalidProcName,
+    #[error("Attempted to get the pair of PIDs before starting the daemon")]
+    StartNotCalled,
 }
 
 pub type Result<T> = std::result::Result<T, DaemonError>;

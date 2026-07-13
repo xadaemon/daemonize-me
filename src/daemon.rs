@@ -13,14 +13,14 @@ use nix::unistd::{
 };
 #[cfg(not(target_os = "macos"))]
 use nix::unistd::{
-    chdir, chown, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
+    chdir, chown, fork, getpid, initgroups, setgid, setsid, setuid, ForkResult, Gid, Uid,
 };
 
 use crate::ffi::{set_proc_name, PasswdRecord};
 use crate::group::Group;
 use crate::stdio::{redirect_stdio, Stdio};
 use crate::user::User;
-use crate::DaemonError::{InvalidGroup, InvalidUser};
+use crate::DaemonError::{InvalidGroup, InvalidUser, StartNotCalled};
 use crate::{DaemonError, Result};
 
 /// Basic daemonization consists of:
@@ -28,6 +28,7 @@ use crate::{DaemonError, Result};
 /// to files and finally dropping privileges.
 ///
 /// **NOTE:** Beware there is no escalation back if dropping privileges
+#[derive(Debug, Clone)]
 pub struct Daemon<'a> {
     pub(crate) chdir: PathBuf,
     pub(crate) pid_file: Option<PathBuf>,
@@ -36,9 +37,9 @@ pub struct Daemon<'a> {
     pub(crate) group: Option<Group>,
     pub(crate) umask: u16,
     // stdin is practically always null
-    pub(crate) stdin: Stdio,
-    pub(crate) stdout: Stdio,
-    pub(crate) stderr: Stdio,
+    pub(crate) stdin: Box<Stdio<'a>>,
+    pub(crate) stdout: Box<Stdio<'a>>,
+    pub(crate) stderr: Box<Stdio<'a>>,
     pub(crate) name: Option<OsString>,
     pub(crate) before_fork_hook: Option<fn(pid: i32)>,
     pub(crate) after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
@@ -46,8 +47,15 @@ pub struct Daemon<'a> {
     pub(crate) after_init_hook_data: Option<&'a dyn Any>,
     pub(crate) after_init_hook: Option<fn(Option<&'a dyn Any>)>,
     pub(crate) child_pid: Option<i32>,
-    pub(crate) parent_pid: Option<i32>,
+    pub(crate) parent_pid: i32,
     pub(crate) is_child: bool,
+    pub(crate) has_forked: bool,
+    pub(crate) dropped_privileges: bool,
+}
+
+pub struct PidPair {
+    pub child_pid: i32,
+    pub parent_pid: i32,
 }
 
 impl<'a> Daemon<'a> {
@@ -59,9 +67,9 @@ impl<'a> Daemon<'a> {
             user: None,
             group: None,
             umask: 0o027,
-            stdin: Stdio::devnull(),
-            stdout: Stdio::devnull(),
-            stderr: Stdio::devnull(),
+            stdin: Box::new(Stdio::devnull()),
+            stdout: Box::new(Stdio::devnull()),
+            stderr: Box::new(Stdio::devnull()),
             name: None,
             before_fork_hook: None,
             after_fork_parent_hook: None,
@@ -69,8 +77,10 @@ impl<'a> Daemon<'a> {
             after_init_hook_data: None,
             after_init_hook: None,
             child_pid: None,
-            parent_pid: None,
+            parent_pid: getpid().as_raw(),
+            has_forked: false,
             is_child: false,
+            dropped_privileges: false,
         }
     }
 
@@ -124,24 +134,25 @@ impl<'a> Daemon<'a> {
         self
     }
 
-    pub fn stdin<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        self.stdin = stdio.into();
+    /// Set this to be able to give inputs via stdio to the child
+    pub fn stdin<T: Into<Stdio<'a>>>(mut self, stdio: T) -> Self {
+        self.stdin = Box::new(stdio.into());
         self
     }
 
     /// Determines where standard output will be piped to since daemons have no console attached
     ///
     /// It's highly recommended to set this to a file if you want to see output.
-    pub fn stdout<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        self.stdout = stdio.into();
+    pub fn stdout<T: Into<Stdio<'a>>>(mut self, stdio: T) -> Self {
+        self.stdout = Box::new(stdio.into());
         self
     }
 
     /// Determines where standard error will be piped to since daemons have no console attached
     ///
     /// It's highly recommended to set this to a file if you want to see output.
-    pub fn stderr<T: Into<Stdio>>(mut self, stdio: T) -> Self {
-        self.stderr = stdio.into();
+    pub fn stderr<T: Into<Stdio<'a>>>(mut self, stdio: T) -> Self {
+        self.stderr = Box::new(stdio.into());
         self
     }
 
@@ -240,69 +251,181 @@ impl<'a> Daemon<'a> {
         self
     }
 
-    unsafe fn do_fork(&mut self) -> Result<()> {
-        match fork() {
-            Ok(ForkResult::Parent { child: cpid }) => {
-                self.is_child = false;
-                self.parent_pid = Some(self.parent_pid.unwrap());
-                self.child_pid = Some(cpid.as_raw());
+    pub fn is_child(self) -> bool {
+        self.is_child
+    }
 
-                if let Some(hook) = self.after_fork_parent_hook {
-                    hook(self.parent_pid.unwrap(), cpid.as_raw());
-                } else {
-                    exit(0)
-                }
-            }
-            Ok(ForkResult::Child) => {
-                // Set up stream redirection as early as possible
-                redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
-                let pid = getpid();
-                self.is_child = true;
-                self.parent_pid = Some(self.parent_pid.unwrap());
-                self.child_pid = Some(pid.as_raw());
+    pub fn get_parent_pid(self) -> i32 {
+        self.parent_pid
+    }
 
-                if let Some(hook) = self.after_fork_child_hook {
-                    hook(self.parent_pid.unwrap(), pid.as_raw());
-                }
-                ()
-            }
-            Err(_) => return Err(DaemonError::Fork),
+    pub fn get_child_pid(self) -> Option<i32> {
+        self.child_pid
+    }
+
+    pub fn get_pids(&self) -> Result<PidPair> {
+        if let Some(cpid) = self.child_pid {
+            Ok(PidPair {
+                child_pid: cpid,
+                parent_pid: self.parent_pid,
+            })
+        } else {
+            Err(StartNotCalled)
         }
+    }
+
+    fn do_fork(&mut self) -> Result<()> {
+        unsafe {
+            match fork() {
+                Ok(ForkResult::Parent { child: cpid }) => {
+                    self.is_child = false;
+                    self.child_pid = Some(cpid.as_raw());
+
+                    if let Some(hook) = self.after_fork_parent_hook {
+                        hook(self.parent_pid, cpid.as_raw());
+                    } else {
+                        exit(0)
+                    }
+                }
+                Ok(ForkResult::Child) => {
+                    // Set up stream redirection as early as possible
+                    redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+                    let pid = getpid();
+                    self.is_child = true;
+                    self.child_pid = Some(pid.as_raw());
+
+                    if let Some(hook) = self.after_fork_child_hook {
+                        hook(self.parent_pid, pid.as_raw());
+                    }
+                    ()
+                }
+                Err(_) => return Err(DaemonError::Fork),
+            }
+            self.has_forked = true;
+            Ok(())
+        }
+    }
+
+    fn do_chdir(&self) -> Result<()> {
+        let chdir_path = self.chdir.to_owned();
+        match chdir::<Path>(chdir_path.as_ref()) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(DaemonError::ChDir),
+        }
+    }
+
+    fn setup_pid_file(&self, pid_file_path: &PathBuf) -> Result<()> {
+        let pid_file = &pid_file_path;
+
+        let user = match self.user.clone() {
+            Some(user) => Uid::from_raw(user.id),
+            None => return Err(InvalidUser),
+        };
+
+        let gr = match self.group.clone() {
+            Some(grp) => Gid::from_raw(grp.id),
+            None => return Err(InvalidGroup),
+        };
+
+        match File::create(pid_file) {
+            Ok(mut fp) => {
+                if let Err(_) = fp.write_all(self.child_pid.unwrap().to_string().as_ref()) {
+                    return Err(DaemonError::WritePid);
+                }
+            }
+            Err(_) => return Err(DaemonError::WritePid),
+        }
+
+        if self.chown_pid_file && self.pid_file.is_some() {
+            match chown::<PathBuf>(pid_file_path, Some(user), Some(gr)) {
+                Ok(_) => return Ok(()),
+                Err(_) => return Err(DaemonError::ChownPid),
+            };
+        };
         Ok(())
     }
 
-    /// Using the parameters set, daemonize the process
-    pub fn start(&mut self) -> Result<()> {
-        let pid: Pid;
-        self.parent_pid = Some(getpid().as_raw());
-        // resolve options to concrete values to please the borrow checker
-        let has_pid_file = self.pid_file.is_some();
-        let pid_file_path = match self.pid_file.clone() {
-            Some(path) => path.clone(),
-            None => Path::new("").to_path_buf(),
-        };
-
-        // If the hook is set call it with the parent pid
-        if let Some(hook) = self.before_fork_hook {
-            // It is safe to unwrap here
-            hook(self.parent_pid.unwrap());
-        }
-
-        // Fork and if the process is the parent exit gracefully
-        // if the  process is the child just continue execution
-        // this was made unsafe by the nix upstream in between versions
-        // thus the unsafe block is required here
-        unsafe {
-            self.do_fork()?;
-        }
-
+    fn check_chown_precodnitions(&self) -> Result<()> {
         if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
             return Err(DaemonError::InvalidUserGroupPair);
         } else if (self.user.is_some() || self.group.is_some())
             && (self.user.is_none() || self.group.is_none())
         {
             return Err(DaemonError::InvalidUserGroupPair);
+        } else {
+            Ok(())
         }
+    }
+
+    fn setup_privileges(&mut self) -> Result<()> {
+        self.check_chown_precodnitions()?;
+
+        let pid_file_path = match self.pid_file.clone() {
+            Some(path) => path.clone(),
+            None => Path::new("").to_path_buf(),
+        };
+
+        if self.pid_file.is_some() {
+            self.setup_pid_file(&pid_file_path)?;
+        }
+
+        // We did the check in self.check_chown_precondition
+        Ok({
+            let user = match self.user.clone() {
+                Some(user) => Uid::from_raw(user.id),
+                None => return Err(InvalidUser),
+            };
+
+            let uname = match PasswdRecord::lookup_record_by_id(user.as_raw()) {
+                Ok(record) => record.pw_name,
+                Err(_) => return Err(DaemonError::InvalidUser),
+            };
+
+            let gr = match self.group.clone() {
+                Some(grp) => Gid::from_raw(grp.id),
+                None => return Err(InvalidGroup),
+            };
+
+            // change proc group
+            match setgid(gr) {
+                Ok(_) => (),
+                Err(_) => return Err(DaemonError::SetGid),
+            };
+            #[cfg(not(target_os = "macos"))]
+            {
+                let u_cstr = match CString::new(uname) {
+                    Ok(cstr) => cstr,
+                    Err(_) => return Err(DaemonError::SetGid),
+                };
+                match initgroups(&u_cstr, gr) {
+                    Ok(_) => (),
+                    Err(_) => return Err(DaemonError::InitGroups),
+                };
+            }
+
+            // change the proc uid
+            match setuid(user) {
+                Ok(_) => (),
+                Err(_) => return Err(DaemonError::SetUid),
+            }
+            self.dropped_privileges = true;
+        })
+    }
+
+    /// Using the parameters set, daemonize the process
+    pub fn start(&mut self) -> Result<PidPair> {
+        // self pid is set on the constructor
+
+        // If the hook is set call it with the parent pid
+        if let Some(hook) = self.before_fork_hook {
+            hook(self.parent_pid);
+        }
+
+        // Fork and if the process is the parent exit gracefully
+        // if the  process is the child just continue execution
+        // this was made unsafe by the nix upstream in between versions
+        // thus the unsafe block is required here
+        self.do_fork()?;
 
         if let Some(proc_name) = &self.name {
             match set_proc_name(proc_name.as_ref()) {
@@ -321,82 +444,30 @@ impl<'a> Daemon<'a> {
         if let Err(_) = setsid() {
             return Err(DaemonError::SetSid);
         };
+        // Do the final chdir before dropping privileges
         if let Err(_) = chdir::<Path>(self.chdir.as_path()) {
             return Err(DaemonError::ChDir);
         };
-        pid = getpid();
 
         // create pid file and if configured to, chmod it
-        if has_pid_file {
-            // chmod of the pid file is deferred to after checking for the presence of the user and group
-            let pid_file = &pid_file_path;
-            match File::create(pid_file) {
-                Ok(mut fp) => {
-                    if let Err(_) = fp.write_all(pid.to_string().as_ref()) {
-                        return Err(DaemonError::WritePid);
-                    }
-                }
-                Err(_) => return Err(DaemonError::WritePid),
-            };
-        }
-
         // Drop privileges and chown the requested files
-        if self.user.is_some() && self.group.is_some() {
-            let user = match self.user.clone() {
-                Some(user) => Uid::from_raw(user.id),
-                None => return Err(InvalidUser),
-            };
+        self.setup_privileges()?;
 
-            let uname = match PasswdRecord::lookup_record_by_id(user.as_raw()) {
-                Ok(record) => record.pw_name,
-                Err(_) => return Err(DaemonError::InvalidUser),
-            };
-
-            let gr = match self.group.clone() {
-                Some(grp) => Gid::from_raw(grp.id),
-                None => return Err(InvalidGroup),
-            };
-
-            if self.chown_pid_file && has_pid_file {
-                match chown(&pid_file_path, Some(user), Some(gr)) {
-                    Ok(_) => (),
-                    Err(_) => return Err(DaemonError::ChownPid),
-                };
-            }
-
-            match setgid(gr) {
-                Ok(_) => (),
-                Err(_) => return Err(DaemonError::SetGid),
-            };
-            #[cfg(not(target_os = "macos"))]
-            {
-                let u_cstr = match CString::new(uname) {
-                    Ok(cstr) => cstr,
-                    Err(_) => return Err(DaemonError::SetGid),
-                };
-                match initgroups(&u_cstr, gr) {
-                    Ok(_) => (),
-                    Err(_) => return Err(DaemonError::InitGroups),
-                };
-            }
-            match setuid(user) {
-                Ok(_) => (),
-                Err(_) => return Err(DaemonError::SetUid),
-            }
-        };
         // chdir
-        let chdir_path = self.chdir.to_owned();
-        match chdir::<Path>(chdir_path.as_ref()) {
-            Ok(_) => (),
-            Err(_) => return Err(DaemonError::ChDir),
+        self.do_chdir()?;
+
+        let pid_pair = if let Ok(pair) = self.get_pids() {
+            pair
+        } else {
+            unreachable!("This call should be impossible to fail, check if do_fork is updating the pid correctly")
         };
 
         // Now this process should be a daemon, we run the hook and return or just return
         if let Some(hook) = self.after_init_hook {
             hook(self.after_init_hook_data);
-            Ok(())
+            Ok(pid_pair)
         } else {
-            Ok(())
+            Ok(pid_pair)
         }
     }
 }

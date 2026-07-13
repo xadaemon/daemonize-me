@@ -3,46 +3,46 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
-use nix::fcntl::{OFlag, open};
+use nix::fcntl::{open, OFlag};
 use nix::sys::stat::Mode;
-#[cfg(not(target_os = "macos"))]
-use nix::unistd::{
-    close, dup2,
-};
 #[cfg(target_os = "macos")]
 use nix::unistd::{
-    chdir, chown, close, dup2, fork, ForkResult, getpid, Gid, Pid, setgid, setsid, setuid, Uid,
+    chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
+#[cfg(not(target_os = "macos"))]
+use nix::unistd::{close, dup2};
 
 use crate::{DaemonError, Result};
 
-#[derive(Debug)]
-enum StdioImp {
+#[derive(Debug, Clone)]
+enum StdioImp<'file> {
     Devnull,
-    RedirectToFile(File),
+    RedirectToFile(&'file File),
 }
 
 /// describes what to do with a standard io stream for a child process.
-#[derive(Debug)]
-pub struct Stdio {
-    inner: StdioImp,
+#[derive(Debug, Clone)]
+pub struct Stdio<'file> {
+    inner: Box<StdioImp<'file>>,
 }
 
-impl Stdio {
+impl<'file> Stdio<'file> {
     pub(crate) fn devnull() -> Self {
         Self {
-            inner: StdioImp::Devnull,
+            inner: Box::new(StdioImp::Devnull),
         }
     }
 }
 
-impl From<File> for Stdio {
-    fn from(file: File) -> Self {
+impl<'file> From<&'file File> for Stdio<'file> {
+    fn from(file: &'file File) -> Self {
         Self {
-            inner: StdioImp::RedirectToFile(file),
+            inner: Box::new(StdioImp::RedirectToFile(file)),
         }
     }
 }
+
+// impl<'file> From<File> for Stdio<'file> {}
 
 pub(crate) fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
     let devnull_fd = match open(
@@ -58,7 +58,7 @@ pub(crate) fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> R
             Ok(_) => (),
             Err(_) => return Err(DaemonError::CloseFp),
         };
-        return match &stdio.inner {
+        return match &stdio.inner.as_ref() {
             StdioImp::Devnull => match dup2(devnull_fd, fd) {
                 Ok(_) => Ok(()),
                 Err(_) => Err(DaemonError::RedirectStream),
