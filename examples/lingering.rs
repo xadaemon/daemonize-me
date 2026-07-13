@@ -11,8 +11,8 @@ fn main() {
         .group(Group::try_from("daemon").unwrap())
         .umask(0o000)
         .work_dir(".")
-        .stdout(stdout)
-        .stderr(stderr)
+        .stdout(&stdout)
+        .stderr(&stderr)
         .start();
 
     match daemon {

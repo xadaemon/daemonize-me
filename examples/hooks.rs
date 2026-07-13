@@ -30,8 +30,8 @@ fn main() {
         .pid_file("example.pid", Some(false))
         .umask(0o000)
         .work_dir(".")
-        .stdout(stdout)
-        .stderr(stderr)
+        .stdout(&stdout)
+        .stderr(&stderr)
         // Hooks are optional
         .setup_post_fork_parent_hook(post_fork_parent)
         .setup_post_fork_child_hook(post_fork_child)

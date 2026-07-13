@@ -14,8 +14,8 @@ fn main() {
     let daemon = Daemon::new()
         .pid_file("example.pid", Some(false))
         .work_dir(".")
-        .stdout(stdout)
-        .stderr(stderr)
+        .stdout(&stdout)
+        .stderr(&stderr)
         .start();
 
     match daemon {
