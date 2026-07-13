@@ -45,6 +45,9 @@ pub struct Daemon<'a> {
     pub(crate) after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
     pub(crate) after_init_hook_data: Option<&'a dyn Any>,
     pub(crate) after_init_hook: Option<fn(Option<&'a dyn Any>)>,
+    pub(crate) child_pid: Option<i32>,
+    pub(crate) parent_pid: Option<i32>,
+    pub(crate) is_child: bool,
 }
 
 impl<'a> Daemon<'a> {
@@ -65,6 +68,9 @@ impl<'a> Daemon<'a> {
             after_fork_child_hook: None,
             after_init_hook_data: None,
             after_init_hook: None,
+            child_pid: None,
+            parent_pid: None,
+            is_child: false,
         }
     }
 
@@ -234,20 +240,52 @@ impl<'a> Daemon<'a> {
         self
     }
 
+    unsafe fn do_fork(&mut self) -> Result<()> {
+        match fork() {
+            Ok(ForkResult::Parent { child: cpid }) => {
+                self.is_child = false;
+                self.parent_pid = Some(self.parent_pid.unwrap());
+                self.child_pid = Some(cpid.as_raw());
+
+                if let Some(hook) = self.after_fork_parent_hook {
+                    hook(self.parent_pid.unwrap(), cpid.as_raw());
+                } else {
+                    exit(0)
+                }
+            }
+            Ok(ForkResult::Child) => {
+                // Set up stream redirection as early as possible
+                redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+                let pid = getpid();
+                self.is_child = true;
+                self.parent_pid = Some(self.parent_pid.unwrap());
+                self.child_pid = Some(pid.as_raw());
+
+                if let Some(hook) = self.after_fork_child_hook {
+                    hook(self.parent_pid.unwrap(), pid.as_raw());
+                }
+                ()
+            }
+            Err(_) => return Err(DaemonError::Fork),
+        }
+        Ok(())
+    }
+
     /// Using the parameters set, daemonize the process
-    pub fn start(self) -> Result<()> {
-        let mut pid: Pid;
-        let parent_pid = getpid();
+    pub fn start(&mut self) -> Result<()> {
+        let pid: Pid;
+        self.parent_pid = Some(getpid().as_raw());
         // resolve options to concrete values to please the borrow checker
         let has_pid_file = self.pid_file.is_some();
-        let pid_file_path = match self.pid_file {
+        let pid_file_path = match self.pid_file.clone() {
             Some(path) => path.clone(),
             None => Path::new("").to_path_buf(),
         };
 
         // If the hook is set call it with the parent pid
         if let Some(hook) = self.before_fork_hook {
-            hook(parent_pid.as_raw());
+            // It is safe to unwrap here
+            hook(self.parent_pid.unwrap());
         }
 
         // Fork and if the process is the parent exit gracefully
@@ -255,25 +293,7 @@ impl<'a> Daemon<'a> {
         // this was made unsafe by the nix upstream in between versions
         // thus the unsafe block is required here
         unsafe {
-            match fork() {
-                Ok(ForkResult::Parent { child: cpid }) => {
-                    if let Some(hook) = self.after_fork_parent_hook {
-                        hook(parent_pid.as_raw(), cpid.as_raw());
-                    } else {
-                        exit(0)
-                    }
-                }
-                Ok(ForkResult::Child) => {
-                    // Set up stream redirection as early as possible
-                    redirect_stdio(&self.stdin, &self.stdout, &self.stderr)?;
-                    pid = getpid();
-                    if let Some(hook) = self.after_fork_child_hook {
-                        hook(parent_pid.as_raw(), pid.as_raw());
-                    }
-                    ()
-                }
-                Err(_) => return Err(DaemonError::Fork),
-            }
+            self.do_fork()?;
         }
 
         if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
@@ -322,7 +342,7 @@ impl<'a> Daemon<'a> {
 
         // Drop privileges and chown the requested files
         if self.user.is_some() && self.group.is_some() {
-            let user = match self.user {
+            let user = match self.user.clone() {
                 Some(user) => Uid::from_raw(user.id),
                 None => return Err(InvalidUser),
             };
@@ -332,7 +352,7 @@ impl<'a> Daemon<'a> {
                 Err(_) => return Err(DaemonError::InvalidUser),
             };
 
-            let gr = match self.group {
+            let gr = match self.group.clone() {
                 Some(grp) => Gid::from_raw(grp.id),
                 None => return Err(InvalidGroup),
             };
