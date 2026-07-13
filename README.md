@@ -1,27 +1,31 @@
 # daemonize-me [![Rust](https://github.com/CardinalBytes/daemonize-me/workflows/Rust/badge.svg)](https://github.com/CardinalBytes/daemonize-me/actions) [![Crates.io](https://img.shields.io/crates/v/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/d/daemonize-me)](https://crates.io/crates/daemonize-me) [![Crates.io](https://img.shields.io/crates/l/daemonize-me)](https://github.com/CardinalBytes/daemonize-me/blob/master/LICENSE)
-Rust library to ease the task of creating daemons, I have drawn heavy inspiration from [Daemonize by knsd](https://github.com/knsd/daemonize).
+
+Rust library to ease the task of creating daemons.
 
 # Current releases and EOL table
 
-| track    | version | EOL     |
-|----------|---------|---------|
-| 2.0      | 2.0.1   | TBA     |
-| 1.0(LTS) | 1.0.2   | 2022-10 |
-
+| track    | version  | EOL     |
+| -------- | -------- | ------- |
+| 3.0      | Upcoming | TBD     |
+| 2.0      | 2.0.4    | 2027-08 |
+| 1.0(LTS) | 1.0.2    | 2022-10 |
 
 # Basic usage
+
 Add it to your cargo.toml this will add the whole 2.0.x series as compatible as per semver
+
 ```toml
 daemonize-me = "2.0"
 ```
+
 Then look at [hooks.rs](examples/hooks.rs)
 
-
 ## OS support
+
 I will try to keep support for linux, freebsd and macos
 
 | os                  | tier          |
-|---------------------|---------------|
+| ------------------- | ------------- |
 | linux               | tier 1        |
 | freebsd, openbsd    | tier 2        |
 | macos, netbsd, unix | tier 3        |
@@ -37,8 +41,8 @@ note on custom/hobby OS support, if your os implements the syscalls used in lib.
 
 Licensed under either of
 
-* Apache License, Version 2.0 (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
-* BSD 3 Clause License
+- Apache License, Version 2.0 (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+- BSD 3 Clause License
 
 # Contribution
 
