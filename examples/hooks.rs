@@ -2,23 +2,31 @@ use std::any::Any;
 use std::fs::File;
 use std::process::exit;
 
-use daemonize_me::Daemon;
+use daemonize_me::{Daemon, DaemonStatus};
 
-fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
-    println!("Parent pid: {}, Child pid {}", ppid, cpid);
+fn post_fork_parent(st: DaemonStatus) -> ! {
+    let pair = st.pids.unwrap();
+    println!(
+        "Parent pid: {}, Child pid {}",
+        pair.parent_pid, pair.child_pid
+    );
     println!("Parent will keep running after the child is forked, might even go do other tasks");
     println!("Or quit like so, bye :)");
     exit(0);
 }
 
-fn post_fork_child(ppid: i32, cpid: i32) {
-    println!("Parent pid: {}, Child pid {}", ppid, cpid);
+fn post_fork_child(st: DaemonStatus) {
+    let pair = st.pids.unwrap();
+    println!(
+        "Parent pid: {}, Child pid {}",
+        pair.parent_pid, pair.child_pid
+    );
     println!("This hook is called in the child");
     // Child hook must return
     return;
 }
 
-fn after_init(_: Option<&dyn Any>) {
+fn after_init(_: Option<&dyn Any>, _: DaemonStatus) {
     println!("Initialized the daemon!");
     return;
 }

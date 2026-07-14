@@ -18,7 +18,7 @@ mod user;
 
 mod errors;
 
-pub use crate::daemon::Daemon;
+pub use crate::daemon::{Daemon, DaemonStatus};
 pub use crate::errors::{DaemonError, Result};
 pub use crate::group::Group;
 pub use crate::user::User;

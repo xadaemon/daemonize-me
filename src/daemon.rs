@@ -20,8 +20,12 @@ use crate::ffi::{set_proc_name, PasswdRecord};
 use crate::group::Group;
 use crate::stdio::{redirect_stdio, Stdio};
 use crate::user::User;
-use crate::DaemonError::{InvalidGroup, InvalidUser, StartNotCalled};
+use crate::DaemonError::{InvalidGroup, InvalidUser, InvalidUserGroupPair, StartNotCalled};
 use crate::{DaemonError, Result};
+
+type HookFnFinal = fn(DaemonStatus) -> !;
+type HookFnReturning = fn(DaemonStatus) -> ();
+type HookfFnPostInit<'a> = fn(Option<&'a dyn Any>, st: DaemonStatus);
 
 /// Basic daemonization consists of:
 /// forking the process, getting a new Session ID (sid), setting the umask, changing the standard io streams
@@ -42,10 +46,10 @@ pub struct Daemon<'a> {
     pub(crate) stderr: Box<Stdio<'a>>,
     pub(crate) name: Option<OsString>,
     pub(crate) before_fork_hook: Option<fn(pid: i32)>,
-    pub(crate) after_fork_parent_hook: Option<fn(parent_pid: i32, child_pid: i32) -> !>,
-    pub(crate) after_fork_child_hook: Option<fn(parent_pid: i32, child_pid: i32) -> ()>,
+    pub(crate) after_fork_parent_hook: Option<HookFnFinal>,
+    pub(crate) after_fork_child_hook: Option<HookFnReturning>,
     pub(crate) after_init_hook_data: Option<&'a dyn Any>,
-    pub(crate) after_init_hook: Option<fn(Option<&'a dyn Any>)>,
+    pub(crate) after_init_hook: Option<HookfFnPostInit<'a>>,
     pub(crate) child_pid: Option<i32>,
     pub(crate) parent_pid: i32,
     pub(crate) is_child: bool,
@@ -56,6 +60,14 @@ pub struct Daemon<'a> {
 pub struct PidPair {
     pub child_pid: i32,
     pub parent_pid: i32,
+}
+
+pub struct DaemonStatus {
+    pub pids: Option<PidPair>,
+    pub is_child: bool,
+    pub dropped_privileges: bool,
+    pub has_forked: bool,
+    pub self_pid: i32,
 }
 
 impl<'a> Daemon<'a> {
@@ -190,10 +202,7 @@ impl<'a> Daemon<'a> {
     ///     .setup_post_fork_parent_hook(post_fork_parent)
     ///     .start();
     /// ```
-    pub fn setup_post_fork_parent_hook(
-        mut self,
-        post_fork_parent_hook: fn(parent_pid: i32, child_pid: i32) -> !,
-    ) -> Self {
+    pub fn setup_post_fork_parent_hook(mut self, post_fork_parent_hook: HookFnFinal) -> Self {
         self.after_fork_parent_hook = Some(post_fork_parent_hook);
         self
     }
@@ -216,10 +225,7 @@ impl<'a> Daemon<'a> {
     ///     .setup_post_fork_child_hook(post_fork_child)
     ///     .start();
     /// ```
-    pub fn setup_post_fork_child_hook(
-        mut self,
-        post_fork_child_hook: fn(parent_pid: i32, child_pid: i32) -> (),
-    ) -> Self {
+    pub fn setup_post_fork_child_hook(mut self, post_fork_child_hook: HookFnReturning) -> Self {
         self.after_fork_child_hook = Some(post_fork_child_hook);
         self
     }
@@ -243,7 +249,7 @@ impl<'a> Daemon<'a> {
     /// ```
     pub fn setup_post_init_hook(
         mut self,
-        post_fork_child_hook: fn(ctx: Option<&'a dyn Any>),
+        post_fork_child_hook: HookfFnPostInit<'a>,
         data: Option<&'a dyn Any>,
     ) -> Self {
         self.after_init_hook = Some(post_fork_child_hook);
@@ -282,7 +288,7 @@ impl<'a> Daemon<'a> {
                     self.child_pid = Some(cpid.as_raw());
 
                     if let Some(hook) = self.after_fork_parent_hook {
-                        hook(self.parent_pid, cpid.as_raw());
+                        hook(self.get_status());
                     } else {
                         exit(0)
                     }
@@ -295,15 +301,15 @@ impl<'a> Daemon<'a> {
                     self.child_pid = Some(pid.as_raw());
 
                     if let Some(hook) = self.after_fork_child_hook {
-                        hook(self.parent_pid, pid.as_raw());
+                        hook(self.get_status());
                     }
                     ()
                 }
                 Err(_) => return Err(DaemonError::Fork),
             }
-            self.has_forked = true;
-            Ok(())
         }
+        self.has_forked = true;
+        Ok(())
     }
 
     fn do_chdir(&self) -> Result<()> {
@@ -317,16 +323,6 @@ impl<'a> Daemon<'a> {
     fn setup_pid_file(&self, pid_file_path: &PathBuf) -> Result<()> {
         let pid_file = &pid_file_path;
 
-        let user = match self.user.clone() {
-            Some(user) => Uid::from_raw(user.id),
-            None => return Err(InvalidUser),
-        };
-
-        let gr = match self.group.clone() {
-            Some(grp) => Gid::from_raw(grp.id),
-            None => return Err(InvalidGroup),
-        };
-
         match File::create(pid_file) {
             Ok(mut fp) => {
                 if let Err(_) = fp.write_all(self.child_pid.unwrap().to_string().as_ref()) {
@@ -336,29 +332,37 @@ impl<'a> Daemon<'a> {
             Err(_) => return Err(DaemonError::WritePid),
         }
 
-        if self.chown_pid_file && self.pid_file.is_some() {
-            match chown::<PathBuf>(pid_file_path, Some(user), Some(gr)) {
-                Ok(_) => return Ok(()),
-                Err(_) => return Err(DaemonError::ChownPid),
+        if self.user.is_some() && self.group.is_some() {
+            let user = match self.user.clone() {
+                Some(user) => Uid::from_raw(user.id),
+                None => return Err(InvalidUser),
             };
+
+            let gr = match self.group.clone() {
+                Some(grp) => Gid::from_raw(grp.id),
+                None => return Err(InvalidGroup),
+            };
+            if self.chown_pid_file && self.pid_file.is_some() {
+                match chown::<PathBuf>(pid_file_path, Some(user), Some(gr)) {
+                    Ok(_) => return Ok(()),
+                    Err(_) => return Err(DaemonError::ChownPid),
+                };
+            }
         };
         Ok(())
     }
 
-    fn check_chown_precodnitions(&self) -> Result<()> {
-        if self.chown_pid_file && (self.user.is_none() || self.group.is_none()) {
-            return Err(DaemonError::InvalidUserGroupPair);
-        } else if (self.user.is_some() || self.group.is_some())
-            && (self.user.is_none() || self.group.is_none())
-        {
-            return Err(DaemonError::InvalidUserGroupPair);
-        } else {
-            Ok(())
-        }
+    fn valid_usr_gr_pair(&self) -> bool {
+        (self.user.is_some() && self.group.is_none())
+            || (self.user.is_none() && self.group.is_some())
     }
 
     fn setup_privileges(&mut self) -> Result<()> {
-        self.check_chown_precodnitions()?;
+        if self.user.is_none() && self.group.is_none() {
+            return Ok(());
+        } else if self.valid_usr_gr_pair() {
+            return Err(InvalidUserGroupPair);
+        }
 
         let pid_file_path = match self.pid_file.clone() {
             Some(path) => path.clone(),
@@ -412,6 +416,27 @@ impl<'a> Daemon<'a> {
         })
     }
 
+    pub fn get_status(&self) -> DaemonStatus {
+        let pids = if let Ok(pair) = self.get_pids() {
+            Some(pair)
+        } else {
+            None
+        };
+        let self_pid = if self.is_child {
+            self.child_pid.unwrap()
+        } else {
+            self.parent_pid
+        };
+
+        DaemonStatus {
+            pids: pids,
+            is_child: self.is_child,
+            dropped_privileges: self.dropped_privileges,
+            has_forked: self.has_forked,
+            self_pid: self_pid,
+        }
+    }
+
     /// Using the parameters set, daemonize the process
     pub fn start(&mut self) -> Result<PidPair> {
         // self pid is set on the constructor
@@ -421,10 +446,7 @@ impl<'a> Daemon<'a> {
             hook(self.parent_pid);
         }
 
-        // Fork and if the process is the parent exit gracefully
-        // if the  process is the child just continue execution
-        // this was made unsafe by the nix upstream in between versions
-        // thus the unsafe block is required here
+        // Execute the fork, what happens next is dependent on if this is the parent or child process
         self.do_fork()?;
 
         if let Some(proc_name) = &self.name {
@@ -459,12 +481,12 @@ impl<'a> Daemon<'a> {
         let pid_pair = if let Ok(pair) = self.get_pids() {
             pair
         } else {
-            unreachable!("This call should be impossible to fail, check if do_fork is updating the pid correctly")
+            unreachable!("This call should be impossible to fail, check if do_fork is updating the child_pid correctly")
         };
 
         // Now this process should be a daemon, we run the hook and return or just return
         if let Some(hook) = self.after_init_hook {
-            hook(self.after_init_hook_data);
+            hook(self.after_init_hook_data, self.get_status());
             Ok(pid_pair)
         } else {
             Ok(pid_pair)
