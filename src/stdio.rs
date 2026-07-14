@@ -1,16 +1,16 @@
 use std::fmt::Debug;
 use std::fs::File;
-use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::Mode;
+#[cfg(not(target_os = "macos"))]
+use nix::unistd::close;
+use nix::unistd::dup2_raw;
 #[cfg(target_os = "macos")]
 use nix::unistd::{
     chdir, chown, close, dup2, fork, getpid, setgid, setsid, setuid, ForkResult, Gid, Pid, Uid,
 };
-#[cfg(not(target_os = "macos"))]
-use nix::unistd::{close, dup2};
 
 use crate::{DaemonError, Result};
 
@@ -42,8 +42,6 @@ impl<'file> From<&'file File> for Stdio<'file> {
     }
 }
 
-// impl<'file> From<File> for Stdio<'file> {}
-
 pub(crate) fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> Result<()> {
     let devnull_fd = match open(
         Path::new("/dev/null"),
@@ -53,23 +51,24 @@ pub(crate) fn redirect_stdio(stdin: &Stdio, stdout: &Stdio, stderr: &Stdio) -> R
         Ok(fd) => fd,
         Err(_) => return Err(DaemonError::OpenDevNull),
     };
-    let proc_stream = |fd, stdio: &Stdio| {
+    let proc_stream = |fd: i32, stdio: &Stdio| {
         match close(fd) {
             Ok(_) => (),
             Err(_) => return Err(DaemonError::CloseFp),
-        };
+        }
         return match &stdio.inner.as_ref() {
-            StdioImp::Devnull => match dup2(devnull_fd, fd) {
-                Ok(_) => Ok(()),
-                Err(_) => Err(DaemonError::RedirectStream),
-            },
-            StdioImp::RedirectToFile(file) => {
-                let raw_fd = file.as_raw_fd();
-                match dup2(raw_fd, fd) {
+            StdioImp::Devnull => unsafe {
+                match dup2_raw(&devnull_fd, fd) {
                     Ok(_) => Ok(()),
                     Err(_) => Err(DaemonError::RedirectStream),
                 }
-            }
+            },
+            StdioImp::RedirectToFile(file) => unsafe {
+                match dup2_raw(file, fd) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(DaemonError::RedirectStream),
+                }
+            },
         };
     };
 
