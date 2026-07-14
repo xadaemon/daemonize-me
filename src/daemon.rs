@@ -190,10 +190,11 @@ impl<'a> Daemon<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use daemonize_me::Daemon;
+    /// # use daemonize_me::{Daemon, DaemonStatus};
     ///
-    /// fn post_fork_parent(ppid: i32, cpid: i32) -> ! {
-    ///     println!("Parent pid: {}, Child pid {}", ppid, cpid);
+    /// fn post_fork_parent(st: DaemonStatus) -> ! {
+    ///     let pair = st.pids.unwrap();
+    ///     println!("Parent pid: {}, Child pid {}", pair.parent_pid, pair.child_pid);
     ///     println!("Exiting parent now");
     ///     std::process::exit(0);
     /// }
@@ -212,10 +213,11 @@ impl<'a> Daemon<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use daemonize_me::Daemon;
+    /// # use daemonize_me::{Daemon, DaemonStatus};
     ///
-    /// fn post_fork_child(ppid: i32, cpid: i32) {
-    ///     println!("Parent pid: {}, Child pid {}", ppid, cpid);
+    /// fn post_fork_child(st: DaemonStatus) {
+    ///     let pair = st.pids.unwrap();
+    ///     println!("Parent pid: {}, Child pid {}", pair.parent_pid, pair.child_pid);
     ///     println!("This hook is called in the child");
     ///     // Child hook must return
     ///     return
@@ -236,9 +238,9 @@ impl<'a> Daemon<'a> {
     ///
     /// ```
     /// # use std::any::Any;
-    /// # use daemonize_me::Daemon;
+    /// # use daemonize_me::{Daemon, DaemonStatus};
     ///
-    /// fn after_init(_: Option<&dyn Any>) {
+    /// fn after_init(_: Option<&dyn Any>, _: DaemonStatus) {
     ///     println!("Initialized the daemon!");
     ///     return
     /// }
